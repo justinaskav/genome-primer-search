@@ -1,0 +1,8 @@
+# Test primer set for pipeline validation
+# Universal bacterial 16S rRNA primers
+
+# 16S V3-V4 region (Illumina protocol)
+16S_V3V4 CCTACGGGNGGCWGCAG GACTACHVGGGTATCTAATCC
+
+# 16S Universal primers
+16S_27F AGAGTTTGATCMTGGCTCAG TACGGYTACCTTGTTACGACTT

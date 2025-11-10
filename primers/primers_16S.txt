@@ -4,20 +4,19 @@
 # These primers target the bacterial 16S ribosomal RNA gene for universal amplification
 
 # 27F/1492R - Nearly full-length 16S rRNA gene (~1,400 bp)
-# Most widely used for species-level bacterial identification
-# Reference: Weisburg et al. (1991)
-# E. coli positions: 8-27 and 1492-1507
-16S_FullLength AGAGTTTGATCCTGGCTCAG TACCTTGTTACGACTT
+# From https://www.nature.com/articles/s41598-025-10999-8
+16S_FullLength AGMGTTYGATYMYGGCTCAG TACGGYTACCTTGTTACGACTT
 
-# 341F/785R - V3-V4 hypervariable regions (~450 bp)
-# Highest bacterial OTU recovery and reproducibility
-# Recommended for microbiome diversity studies
-# Low non-specificity, 1.5x longer amplicon than V4-only
-16S_V3V4 CCTACGGGNGGCWGCAG GACTACHVGGGTATCTAATCC
+# V1V2 used by partners
+16S_V1V2 AGAGTTTGATCCTGGCTCAG CTGCTGCCTYCCGTA
 
 # 341F/806R - V3-V4 hypervariable regions from Novogene (~465 bp)
 # Commonly used in microbiome studies
 16S_V3V4_Novogene CCTAYGGGRBGCASCAG GGACTACNNGGGTATCTAAT
+
+# From article which says that 16S V3-V4 primers are bad when human DNA is present
+# 16S_V3V4_s41598 TCGTCGGCAGCGTCAGATGTGTATAAGAGACAGCCTACGGGNGGCWGCAG GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAGGACTACHVGGGTATCTAATCC
+16S_V3V4_s41598_short CCTACGGGNGGCWGCAG GACTACHVGGGTATCTAATCC
 
 # 515F/806R - V4 hypervariable region (~291 bp)
 # Earth Microbiome Project (EMP) standard primers

@@ -1,0 +1,36 @@
+# Test file with mixed input types
+# Comprehensive test of all supported genome/sequence input formats
+
+# === GENOME ASSEMBLY ACCESSIONS ===
+# Format: GCA_XXXXXXXXX.version or GCF_XXXXXXXXX.version
+# Small genome for quick testing (Mycoplasma genitalium, ~580kb)
+GCA_000005845.2
+
+# === ORGANISM TAXON NAMES ===
+# Format: Scientific name (can include spaces)
+# Pipeline downloads reference genome for the species
+Escherichia coli
+
+# === INSDC NUCLEOTIDE ACCESSIONS ===
+# Format: 1-2 letters + 5-8 digits + optional version (.1, .2, etc.)
+
+# Single letter + 5 digits (old format)
+U00096.3
+
+# Two letters + 6 digits
+AF123456
+
+# Two letters + 8 digits (newer format)
+MN986463.1
+
+# === REFSEQ NUCLEOTIDE ACCESSIONS ===
+# Format: 2 letters + underscore + digits + optional version
+
+# NC_ = Complete genomic molecule
+NC_000913.3
+
+# NM_ = mRNA (protein-coding transcript)
+NM_000518.5
+
+# NR_ = Non-coding RNA
+NR_046235.2
