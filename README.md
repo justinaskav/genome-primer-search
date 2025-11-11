@@ -19,6 +19,7 @@ nextflow run main.nf -resume
 
 - **Multiple input types**: Taxon names, genome assemblies, or individual nucleotide sequences
 - **Smart filtering**: Removes circular genome artifacts (>10kb amplicons)
+- **Thermodynamic analysis**: Optional off-target amplification risk assessment using nearest-neighbor Tm calculations
 - **Scalable reports**: Long-format TSV works with any number of primers
 - **Parallel processing**: Configurable concurrent downloads and searches
 - **Modern architecture**: Nextflow DSL2 with modular processes
@@ -74,16 +75,32 @@ Supports IUPAC ambiguity codes (R, Y, W, M, K, etc.).
 
 ## Parameters
 
+### Basic Parameters
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--genomes` | `genomes/genomes.txt` | Path to genome/sequence list |
 | `--primers` | `primers/primers.txt` | Path to primers file |
 | `--outdir` | `_output` | Output directory |
 | `--mismatch` | `0` | Allowed mismatch percentage (0-100) |
+| `--max_primer_size` | `100` | Maximum primer length (bases) |
 | `--max_amplicon_size` | `10000` | Maximum amplicon size (bp) |
 | `--min_amplicon_size` | `50` | Minimum amplicon size (bp) |
 | `--max_downloads` | `4` | Concurrent genome downloads |
 | `--max_searches` | `8` | Concurrent primersearch jobs |
+
+### Thermodynamic Analysis Parameters (Optional)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--enable_thermo_analysis` | `false` | Enable thermodynamic off-target analysis |
+| `--thermo_references` | `references/target_sequences.fasta` | Reference target sequences (FASTA) |
+| `--thermo_master_mix` | `DreamTaq` | PCR master mix preset (see pcr_conditions/master_mixes.json) |
+| `--thermo_annealing_temp` | `60` | Annealing temperature (°C) |
+| `--thermo_delta_tm_high` | `5` | ΔTm threshold for high off-target risk (°C) |
+| `--thermo_delta_tm_medium` | `10` | ΔTm threshold for medium off-target risk (°C) |
+
+**Available master mixes:** DreamTaq, Q5_HighFidelity, Phusion_HF, Phusion_GC, OneTaq, GoTaq, KAPA_HiFi, Platinum_Taq, Custom
 
 ## Output Structure
 
@@ -94,11 +111,16 @@ _output/
 │   ├── primersearch/     # Raw primersearch output
 │   ├── filtered/         # Filtered results
 │   └── filter_stats/     # JSON statistics per genome
-└── reports/
-    ├── summary.tsv       # Long-format summary (scales to any # of primers)
-    ├── summary.html      # Interactive HTML report
-    ├── amplicon_stats.tsv
-    └── primer_stats.tsv
+├── reports/
+│   ├── summary.tsv       # Long-format summary (scales to any # of primers)
+│   ├── summary.html      # Interactive HTML report
+│   ├── amplicon_stats.tsv
+│   └── primer_stats.tsv
+└── thermo_reports/       # Optional: Thermodynamic analysis (if enabled)
+    ├── thermo_analysis.tsv       # Per-amplicon thermodynamic metrics
+    ├── offtarget_summary.tsv     # High-risk off-target amplifications
+    ├── primer_specificity.tsv    # Per-primer specificity scores
+    └── thermo_analysis.html      # Interactive thermodynamic report
 ```
 
 ### Report Formats
@@ -174,6 +196,198 @@ Bacterial genomes are circular, so primers binding in opposite orientations can 
 
 Check `results/filter_stats/*.json` for detailed filtering information per genome.
 
+## Thermodynamic Off-Target Analysis
+
+The pipeline includes an optional thermodynamic analysis module that estimates the probability of off-target amplification using melting temperature (Tm) calculations.
+
+### When to Use
+
+Enable thermodynamic analysis when:
+- Screening primers against genomes with potential off-target sequences (e.g., host contamination)
+- Designing multiplexed assays where specificity is critical
+- Evaluating primer performance across multiple organisms
+- Assessing risk of cross-reactivity with related species
+
+### How It Works
+
+For each primer-target pair, the pipeline calculates:
+
+1. **Target Tm**: Melting temperature of the primer binding to the intended reference target
+2. **Actual Tm**: Melting temperature accounting for mismatches in the observed binding
+3. **ΔTm**: Difference between target and actual Tm (ΔTm = Tm_target - Tm_actual)
+4. **Mismatch profile**: Number and estimated location of mismatches (3′ end critical)
+5. **Amplification probability**: Risk classification (high/medium/low) based on decision rules:
+   - **High risk**: ΔTm < 5°C and minimal 3′ mismatches
+   - **Medium risk**: ΔTm 5-10°C or some 3′ mismatches
+   - **Low risk**: ΔTm > 10°C or significant 3′ mismatches
+
+### Classification Logic: Intended Targets vs Off-Targets
+
+The analysis distinguishes between **intended targets** (expected amplification) and **off-targets** (unintended amplification):
+
+- **Intended Target**: An amplicon with zero mismatches in both primers that matches a reference sequence
+  - Classification: `target` (not a risk)
+  - P(Amplification): 1.0 (100% expected)
+  - ΔTm: 0°C (perfect match)
+  - These are your desired amplicons - the primers are working as designed
+
+- **Off-Target**: Any amplicon that is NOT an intended target
+  - Classification: `high`, `medium`, or `low` risk
+  - P(Amplification): 0.10 - 0.85 depending on ΔTm and mismatches
+  - ΔTm: > 0°C (indicates deviation from intended target)
+  - These amplicons may compete with or interfere with your intended targets
+
+**Important**: A perfect match (0 mismatches) to a genome sequence is **only** classified as an intended target if a matching reference sequence is provided. Without a reference, all amplicons are treated as potential off-targets.
+
+**Example**:
+- Primer `16S_V3V4` amplifies E. coli 16S gene with 0 mismatches
+- Reference `16S_V3V4_reference` exists → Classified as `target` (good!)
+- No reference provided → Classified as `high` risk (needs review)
+
+This distinction ensures specificity metrics accurately reflect primer performance: high-specificity primers amplify their intended targets without generating high-risk off-targets.
+
+### Tm Calculations
+
+Uses BioPython's nearest-neighbor thermodynamics with salt corrections (Owczarzy et al. 2008):
+- Accounts for buffer composition (Na⁺, Mg²⁺, dNTPs)
+- Applies penalties for mismatches (~1.5°C per mismatch)
+- Supports PCR master mix presets with validated buffer compositions
+
+### Usage Example
+
+```bash
+# Enable thermodynamic analysis with DreamTaq buffer
+nextflow run main.nf \
+    --genomes genomes/genomes_with_human.txt \
+    --primers primers/primers_16S.txt \
+    --enable_thermo_analysis \
+    --thermo_references references/target_sequences.fasta \
+    --thermo_master_mix DreamTaq \
+    --thermo_annealing_temp 60
+
+# Use Q5 high-fidelity polymerase with higher annealing temp
+nextflow run main.nf \
+    --enable_thermo_analysis \
+    --thermo_master_mix Q5_HighFidelity \
+    --thermo_annealing_temp 65
+
+# Adjust sensitivity thresholds
+nextflow run main.nf \
+    --enable_thermo_analysis \
+    --thermo_delta_tm_high 3 \
+    --thermo_delta_tm_medium 8
+```
+
+### Reference Sequences
+
+Reference sequences define the **intended target** for each primer pair. They're used to calculate ΔTm between perfect binding and actual binding.
+
+**How Reference Matching Works:**
+
+1. **Primer name** (from primer file): `fadA`
+2. **Reference ID** (from FASTA file): `fadA_reference`
+3. **Matching**: Primer name must match everything before `_reference` in the FASTA ID
+
+**You can provide:**
+- **All references** (one FASTA file with all target genes)
+- **Some references** (only the genes you care about)
+- **No references** (all primers analyzed as off-targets)
+
+Missing references generate warnings but analysis continues.
+
+**Example 1: Multiple Virulence Genes**
+
+Your primer file (`primers/virulence_genes.txt`):
+```
+fadA ATGAAACGCATCGCACAGCT CGTAGCAGTAGCATTCGTAG
+fap2 GCTAGCTTAGGCCTAGCTAG AATTGGCCAATTGGCCAATT
+radA GGCCTAGGCCTAGGCCTAGG CCAATTCCAATTCCAATTCC
+```
+
+Your reference file (`references/virulence_targets.fasta`):
+```
+>fadA_reference F. nucleatum fadA adhesin gene
+ATGAAACGCATCGCACAGCT...full gene sequence...CGTAGCAGTAGCATTCGTAG
+>fap2_reference F. nucleatum fap2 adhesin gene
+GCTAGCTTAGGCCTAGCTAG...full gene sequence...AATTGGCCAATTGGCCAATT
+>radA_reference DNA repair radA gene
+GGCCTAGGCCTAGGCCTAGG...full gene sequence...CCAATTCCAATTCCAATTCC
+```
+
+Each primer is analyzed independently. You can include only the genes you need to validate.
+
+**Example 2: 16S Primers**
+
+```
+>16S_V3V4_Novogene_reference E.coli 16S V3-V4 region
+CCTACGGGAGGCAGCAGTGGGGAATATTGCACAATGGGCGCAAGCCT...
+>16S_FullLength_reference E.coli 16S full length
+AGAGTTTGATCCTGGCTCAGATTGAACGCTGGCGGCAGGCCTAACAC...
+```
+
+**Important:** If you're screening primers against multiple genomes but only care about specific target genes, provide ONLY those genes as references. Off-target hits in other genomes will be flagged appropriately.
+
+### PCR Master Mix Configuration
+
+Master mix presets are defined in `pcr_conditions/master_mixes.json`. Each preset includes:
+- **Buffer composition** (Na⁺, Mg²⁺, dNTPs, Tris, KCl) - Used for Tm calculations
+- Polymerase type and fidelity
+- Typical annealing/extension temperatures (for reference)
+
+**Common presets:**
+- **DreamTaq**: Standard Taq, 2mM Mg²⁺, suitable for routine PCR
+- **Q5_HighFidelity**: High-fidelity polymerase, higher annealing temps
+- **Phusion_HF/GC**: Ultra high-fidelity, optimized for GC-rich templates
+- **Custom**: Template for user-defined conditions
+
+**About `--thermo_annealing_temp`:**
+
+This parameter records the **actual annealing temperature you use in your PCR**, not necessarily the optimal temperature. It's stored in the report metadata but doesn't affect Tm calculations.
+
+- **Tm calculations** use buffer composition (from master mix preset)
+- **Annealing temp** is what YOU set on your thermocycler
+- They can differ: You might use 60°C annealing even if calculated Tm is 65°C
+
+**Example:**
+```bash
+# DreamTaq has typical annealing temp of 60°C, but you use 58°C
+nextflow run main.nf \
+    --enable_thermo_analysis \
+    --thermo_master_mix DreamTaq \
+    --thermo_annealing_temp 58  # Your actual PCR condition
+```
+
+The analysis will use DreamTaq's buffer chemistry for Tm calculation, but record that you used 58°C for annealing.
+
+### Output Reports
+
+**thermo_analysis.tsv** - Detailed per-amplicon metrics:
+```
+Primer	Genome	Amplicon_Length	Risk_Classification	P_Amplification	Delta_Tm_Average	Total_Mismatches
+16S_V3V4	E_coli	465	low	0.010	15.2	0
+16S_V3V4	H_sapiens_MT	470	high	0.723	3.1	1
+```
+
+**offtarget_summary.tsv** - Flagged high/medium risk off-targets:
+```
+Primer	Genome	Risk_Classification	Delta_Tm_Average	Recommendation
+16S_V3V4	H_sapiens_MT	HIGH	3.1	REVIEW REQUIRED - High amplification probability
+```
+
+**primer_specificity.tsv** - Per-primer performance:
+```
+Primer	Total_Hits	High_Risk_OffTargets	Specificity_Score	Specificity_Rating
+16S_V3V4	25	2	92.0	Excellent
+16S_V4_EMP	18	5	72.2	Good
+```
+
+### Interpreting Results
+
+- **Specificity Score**: 100 = perfect (no high-risk off-targets), 0 = poor
+- **High-risk off-targets**: Should be reviewed; may require primer redesign
+- **ΔTm < 5°C**: Off-target likely to amplify under standard conditions
+- **Perfect match (0 mismatches) to off-target**: Strong cross-reactivity risk
+
 ## Troubleshooting
 
 **No genome file found:**
@@ -201,17 +415,27 @@ Check `results/filter_stats/*.json` for detailed filtering information per genom
 Modern Nextflow DSL2 with modular processes:
 
 ```
-main.nf                   # Entry point
-workflows/primersearch.nf # Main workflow logic
-modules/local/            # Individual process modules
+main.nf                           # Entry point
+workflows/
+  ├── primersearch.nf             # Main workflow
+  └── thermo_analysis.nf          # Optional thermodynamic analysis
+modules/local/                    # Process modules
   ├── download_genome.nf
   ├── extract_genome.nf
   ├── run_primersearch.nf
   ├── filter_amplicons.nf
-  └── generate_reports.nf
-bin/                      # Helper scripts
+  ├── generate_reports.nf
+  ├── thermodynamic_analysis.nf   # Tm calculations
+  └── generate_thermo_reports.nf  # Thermodynamic reports
+bin/                              # Helper scripts
   ├── filter_amplicons.py
-  └── generate_html_report.py
+  ├── generate_html_report.py
+  ├── thermodynamic_analysis.py   # Tm calculation engine
+  └── generate_thermo_report.py   # Report generation
+pcr_conditions/
+  └── master_mixes.json           # PCR buffer presets
+references/
+  └── target_sequences.fasta      # Reference target sequences
 ```
 
 Easy to extend with new processes or modify existing ones.
@@ -229,6 +453,8 @@ Easy to extend with new processes or modify existing ones.
 If you use this pipeline, please cite:
 - EMBOSS: Rice et al. (2000) EMBOSS: The European Molecular Biology Open Software Suite
 - NCBI Datasets: https://www.ncbi.nlm.nih.gov/datasets/
+- BioPython: Cock et al. (2009) Biopython: freely available Python tools for computational molecular biology and bioinformatics
+- Thermodynamics: Owczarzy et al. (2008) Predicting stability of DNA duplexes in solutions containing magnesium and monovalent cations
 
 ## License
 

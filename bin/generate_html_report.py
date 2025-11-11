@@ -33,7 +33,18 @@ def parse_filtered_results(filtered_dir):
                 line = line.rstrip('\n')
 
                 if line.startswith('Primer name '):
+                    # Save previous primer's last amplicon before starting new primer
+                    if current_amplicon and current_primer:
+                        results.append({
+                            'genome': genome_name,
+                            'primer': current_primer,
+                            'amplicon': '\n'.join(current_amplicon),
+                            'length': current_length
+                        })
+                    # Start new primer
                     current_primer = line.replace('Primer name ', '').strip()
+                    current_amplicon = []
+                    current_length = None
 
                 elif line.startswith('Amplimer '):
                     # Save previous amplicon if exists

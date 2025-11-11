@@ -1,0 +1,245 @@
+{
+  "_description": "PCR Master Mix Buffer Compositions",
+  "_note": "Concentrations are final reaction concentrations. Tm calculations use these for salt corrections.",
+  "_reference": "Values based on manufacturer specifications and typical 1x reaction conditions",
+
+  "DreamTaq": {
+    "name": "DreamTaq DNA Polymerase (Thermo Fisher)",
+    "polymerase_type": "Taq",
+    "fidelity": "standard",
+    "manufacturer": "Thermo Fisher Scientific",
+    "buffer_composition": {
+      "Na": 50.0,
+      "Mg": 2.0,
+      "dNTPs": 0.2,
+      "Tris": 10.0,
+      "KCl": 50.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 60,
+    "extension_temp": 72,
+    "notes": "Standard Taq polymerase, good for routine PCR. 2mM MgCl2 in 1x Green Buffer."
+  },
+
+  "DreamTaq_GreenBuffer": {
+    "name": "DreamTaq Green Buffer (2x Master Mix)",
+    "polymerase_type": "Taq",
+    "fidelity": "standard",
+    "manufacturer": "Thermo Fisher Scientific",
+    "buffer_composition": {
+      "Na": 50.0,
+      "Mg": 4.0,
+      "dNTPs": 0.4,
+      "Tris": 20.0,
+      "KCl": 100.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 60,
+    "extension_temp": 72,
+    "notes": "2x concentrated master mix. Values shown are for 2x concentration (dilute by half in final reaction)."
+  },
+
+  "Q5_HighFidelity": {
+    "name": "Q5 High-Fidelity DNA Polymerase (NEB)",
+    "polymerase_type": "Q5",
+    "fidelity": "high",
+    "manufacturer": "New England Biolabs",
+    "buffer_composition": {
+      "Na": 20.0,
+      "Mg": 2.0,
+      "dNTPs": 0.2,
+      "Tris": 20.0,
+      "KCl": 10.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 65,
+    "extension_temp": 72,
+    "notes": "High-fidelity polymerase with 3'->5' exonuclease activity. Higher annealing temperatures recommended."
+  },
+
+  "Phusion_HF": {
+    "name": "Phusion High-Fidelity DNA Polymerase HF Buffer (NEB)",
+    "polymerase_type": "Phusion",
+    "fidelity": "high",
+    "manufacturer": "New England Biolabs",
+    "buffer_composition": {
+      "Na": 20.0,
+      "Mg": 1.5,
+      "dNTPs": 0.2,
+      "Tris": 20.0,
+      "KCl": 10.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 68,
+    "extension_temp": 72,
+    "notes": "High-fidelity buffer optimized for most templates. Very high annealing temperatures."
+  },
+
+  "Phusion_GC": {
+    "name": "Phusion High-Fidelity DNA Polymerase GC Buffer (NEB)",
+    "polymerase_type": "Phusion",
+    "fidelity": "high",
+    "manufacturer": "New England Biolabs",
+    "buffer_composition": {
+      "Na": 25.0,
+      "Mg": 1.5,
+      "dNTPs": 0.2,
+      "Tris": 20.0,
+      "KCl": 15.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 68,
+    "extension_temp": 72,
+    "notes": "Optimized for GC-rich templates (>60% GC). Contains DMSO and additives."
+  },
+
+  "OneTaq": {
+    "name": "OneTaq DNA Polymerase (NEB)",
+    "polymerase_type": "Taq-like",
+    "fidelity": "standard",
+    "manufacturer": "New England Biolabs",
+    "buffer_composition": {
+      "Na": 50.0,
+      "Mg": 1.8,
+      "dNTPs": 0.2,
+      "Tris": 20.0,
+      "KCl": 10.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 60,
+    "extension_temp": 68,
+    "notes": "Robust Taq-based enzyme, works across broad conditions."
+  },
+
+  "GoTaq": {
+    "name": "GoTaq DNA Polymerase (Promega)",
+    "polymerase_type": "Taq",
+    "fidelity": "standard",
+    "manufacturer": "Promega",
+    "buffer_composition": {
+      "Na": 50.0,
+      "Mg": 1.5,
+      "dNTPs": 0.2,
+      "Tris": 10.0,
+      "KCl": 50.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 60,
+    "extension_temp": 72,
+    "notes": "Standard Taq polymerase for routine PCR applications."
+  },
+
+  "KAPA_HiFi": {
+    "name": "KAPA HiFi HotStart DNA Polymerase (Roche)",
+    "polymerase_type": "high-fidelity",
+    "fidelity": "high",
+    "manufacturer": "Roche",
+    "buffer_composition": {
+      "Na": 20.0,
+      "Mg": 1.5,
+      "dNTPs": 0.3,
+      "Tris": 20.0,
+      "KCl": 10.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 65,
+    "extension_temp": 72,
+    "notes": "Optimized for NGS library preparation, high processivity."
+  },
+
+  "Platinum_Taq": {
+    "name": "Platinum Taq DNA Polymerase (Invitrogen)",
+    "polymerase_type": "Taq",
+    "fidelity": "standard",
+    "manufacturer": "Thermo Fisher Scientific (Invitrogen)",
+    "buffer_composition": {
+      "Na": 50.0,
+      "Mg": 2.0,
+      "dNTPs": 0.2,
+      "Tris": 20.0,
+      "KCl": 50.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 60,
+    "extension_temp": 72,
+    "notes": "Hot-start Taq with antibody-mediated activation."
+  },
+
+  "Custom": {
+    "name": "Custom PCR Conditions",
+    "polymerase_type": "custom",
+    "fidelity": "unknown",
+    "manufacturer": "User-defined",
+    "buffer_composition": {
+      "Na": 50.0,
+      "Mg": 2.0,
+      "dNTPs": 0.2,
+      "Tris": 10.0,
+      "KCl": 50.0
+    },
+    "units": {
+      "Na": "mM",
+      "Mg": "mM",
+      "dNTPs": "mM",
+      "Tris": "mM",
+      "KCl": "mM"
+    },
+    "typical_annealing_temp": 60,
+    "extension_temp": 72,
+    "notes": "Template for custom buffer conditions. Edit buffer_composition values as needed."
+  }
+}
