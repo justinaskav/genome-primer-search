@@ -11,13 +11,18 @@ include { GENERATE_THERMO_REPORTS } from '../modules/local/generate_thermo_repor
 workflow THERMO_ANALYSIS {
     take:
     primersearch_results_ch  // Channel: tuple(val(genome_input), path(primersearch_file))
+    genomes_ch               // Channel: tuple(val(genome_input), path(genome_fasta))
     primers_ch               // Channel: path(primers_file)
     reference_ch             // Channel: path(reference_sequences)
 
     main:
+    // Join primersearch results with genome FASTA files for alignment analysis
+    // Creates tuples: (genome_input, primersearch_file, genome_fasta)
+    thermo_input_ch = primersearch_results_ch.join(genomes_ch)
+
     // Run thermodynamic analysis on each primersearch result
     THERMODYNAMIC_ANALYSIS(
-        primersearch_results_ch,
+        thermo_input_ch,
         primers_ch.collect(),
         reference_ch.collect(),
         params.thermo_master_mix,

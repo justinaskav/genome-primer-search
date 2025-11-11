@@ -45,6 +45,7 @@ workflow {
 
         THERMO_ANALYSIS(
             PRIMERSEARCH.out.filtered_results,
+            PRIMERSEARCH.out.genomes,
             primers_ch,
             reference_ch
         )

@@ -23,6 +23,7 @@ try:
     from Bio import SeqIO
     from Bio.Seq import Seq
     from Bio.SeqUtils import MeltingTemp as mt
+    from Bio.Align import PairwiseAligner
     import math
 except ImportError:
     print("Error: BioPython is required. Install with: conda install -c conda-forge biopython", file=sys.stderr)
@@ -37,6 +38,7 @@ class ThermoAnalyzer:
     """Main class for thermodynamic analysis of primer binding"""
 
     def __init__(self, pcr_conditions: Dict, primers: Dict, references: Dict,
+                 genome_fasta: Optional[Path] = None,
                  annealing_temp: float = 60.0, delta_tm_thresholds: Tuple[float, float] = (5.0, 10.0)):
         """
         Initialize thermodynamic analyzer
@@ -45,12 +47,14 @@ class ThermoAnalyzer:
             pcr_conditions: Dict with buffer composition (Na, Mg, dNTPs in mM)
             primers: Dict mapping primer names to (forward_seq, reverse_seq) tuples
             references: Dict mapping primer names to reference target sequences
+            genome_fasta: Path to genome FASTA file for extracting binding sequences
             annealing_temp: Annealing temperature in Celsius
             delta_tm_thresholds: Tuple of (high_risk, medium_risk) ΔTm thresholds in °C
         """
         self.pcr_conditions = pcr_conditions
         self.primers = primers
         self.references = references
+        self.genome_fasta = genome_fasta
         self.annealing_temp = annealing_temp
         self.delta_tm_high, self.delta_tm_medium = delta_tm_thresholds
 
@@ -229,7 +233,9 @@ class ThermoAnalyzer:
     def analyze_amplicon(self, primer_name: str, genome_name: str,
                         forward_seq: str, reverse_seq: str,
                         forward_mm: int, reverse_mm: int,
-                        amplicon_length: int) -> Dict:
+                        amplicon_length: int,
+                        forward_pos: Optional[int] = None,
+                        reverse_pos: Optional[int] = None) -> Dict:
         """
         Complete thermodynamic analysis for one amplicon
 
@@ -241,6 +247,8 @@ class ThermoAnalyzer:
             forward_mm: Forward primer mismatches
             reverse_mm: Reverse primer mismatches
             amplicon_length: Amplicon size in bp
+            forward_pos: Forward primer genomic position (for alignment extraction)
+            reverse_pos: Reverse primer genomic position (for alignment extraction)
 
         Returns:
             Dict with complete thermodynamic analysis
@@ -272,9 +280,76 @@ class ThermoAnalyzer:
         else:
             delta_tm_fwd = delta_tm_rev = delta_tm_avg = 0.0
 
+        # Analyze primer structure (GC, dimers, hairpins)
+        structure_fwd = analyze_primer_structure(forward_seq)
+        structure_rev = analyze_primer_structure(reverse_seq)
+
+        # Analyze amplicon GC content for longer products (>1kb)
+        amplicon_gc = None
+        if amplicon_length > 1000 and self.genome_fasta and forward_pos is not None and reverse_pos is not None:
+            try:
+                record = next(SeqIO.parse(self.genome_fasta, 'fasta'))
+                # Extract amplicon sequence between primers
+                amplicon_seq = str(record.seq[forward_pos:reverse_pos])
+                amplicon_gc = calculate_gc_content(amplicon_seq)
+            except Exception as e:
+                print(f"Warning: Could not calculate amplicon GC for {primer_name}: {e}", file=sys.stderr)
+
+        # Perform precise alignment if genome FASTA available
+        alignment_fwd = None
+        alignment_rev = None
+
+        if self.genome_fasta and forward_pos is not None and reverse_pos is not None:
+            # Extract genomic sequences at binding sites
+            # Use biological length (count [ABC] as 1 base)
+            fwd_length = count_primer_length(forward_seq)
+            rev_length = count_primer_length(reverse_seq)
+
+            genomic_fwd = extract_genomic_sequence(
+                self.genome_fasta, forward_pos, fwd_length, 'forward'
+            )
+            genomic_rev = extract_genomic_sequence(
+                self.genome_fasta, reverse_pos, rev_length, 'reverse'
+            )
+
+            # Perform alignments if extraction succeeded
+            if genomic_fwd:
+                alignment_fwd = align_primer_to_genome(forward_seq, genomic_fwd)
+            if genomic_rev:
+                alignment_rev = align_primer_to_genome(reverse_seq, genomic_rev)
+
         # Analyze mismatch profiles
-        mm_profile_fwd = self.analyze_mismatch_profile(forward_seq, forward_mm, 'forward')
-        mm_profile_rev = self.analyze_mismatch_profile(reverse_seq, reverse_mm, 'reverse')
+        # Use precise 3' mismatch counts from alignment if available
+        # Note: Alignment counts may differ from primersearch because primersearch uses IUPAC ambiguity matching
+        if alignment_fwd and 'mismatch_count' in alignment_fwd:
+            actual_fwd_mm = alignment_fwd['mismatch_count']
+            mm_profile_fwd = {
+                'total_mismatches': actual_fwd_mm,
+                'primer_length': count_primer_length(forward_seq),
+                'estimated_3prime_mismatches': alignment_fwd['3prime_mismatch_count'],
+                '3prime_region_size': 5,
+                'mismatch_density': round(actual_fwd_mm / count_primer_length(forward_seq), 3) if count_primer_length(forward_seq) > 0 else 0,
+                'precise': True
+            }
+        else:
+            actual_fwd_mm = forward_mm
+            mm_profile_fwd = self.analyze_mismatch_profile(forward_seq, forward_mm, 'forward')
+            mm_profile_fwd['precise'] = False
+
+        if alignment_rev and 'mismatch_count' in alignment_rev:
+            actual_rev_mm = alignment_rev['mismatch_count']
+            mm_profile_rev = {
+                'total_mismatches': actual_rev_mm,
+                'primer_length': count_primer_length(reverse_seq),
+                'estimated_3prime_mismatches': alignment_rev['3prime_mismatch_count'],
+                '3prime_region_size': 5,
+                'mismatch_density': round(actual_rev_mm / count_primer_length(reverse_seq), 3) if count_primer_length(reverse_seq) > 0 else 0,
+                'precise': True
+            }
+        else:
+            actual_rev_mm = reverse_mm
+            mm_profile_rev = self.analyze_mismatch_profile(reverse_seq, reverse_mm, 'reverse')
+            mm_profile_rev['precise'] = False
 
         # Calculate amplification probability
         p_amp_fwd, class_fwd = self.calculate_amplification_probability(
@@ -297,41 +372,82 @@ class ThermoAnalyzer:
         else:
             classification = 'low'
 
-        return {
+        result = {
             'primer_name': primer_name,
             'genome': genome_name,
             'amplicon_length': amplicon_length,
             'is_intended_target': is_target,
 
             # Forward primer thermodynamics
-            'forward_primer_seq': forward_seq,
-            'forward_mismatches': forward_mm,
+            'forward_primer_seq': forward_seq,  # Original with IUPAC codes
+            'forward_mismatches': actual_fwd_mm,  # Use alignment count if available
+            'forward_mismatches_primersearch': forward_mm,  # Original primersearch count
+            'forward_position': forward_pos,
             'tm_target_forward': tm_target_fwd,
             'tm_actual_forward': tm_actual_fwd,
             'delta_tm_forward': round(delta_tm_fwd, 2),
             'forward_3prime_mm_est': mm_profile_fwd['estimated_3prime_mismatches'],
+            'forward_3prime_mm_precise': mm_profile_fwd.get('precise', False),
 
             # Reverse primer thermodynamics
-            'reverse_primer_seq': reverse_seq,
-            'reverse_mismatches': reverse_mm,
+            'reverse_primer_seq': reverse_seq,  # Original with IUPAC codes
+            'reverse_mismatches': actual_rev_mm,  # Use alignment count if available
+            'reverse_mismatches_primersearch': reverse_mm,  # Original primersearch count
+            'reverse_position': reverse_pos,
             'tm_target_reverse': tm_target_rev,
             'tm_actual_reverse': tm_actual_rev,
             'delta_tm_reverse': round(delta_tm_rev, 2),
             'reverse_3prime_mm_est': mm_profile_rev['estimated_3prime_mismatches'],
+            'reverse_3prime_mm_precise': mm_profile_rev.get('precise', False),
 
             # Overall metrics
             'delta_tm_average': round(delta_tm_avg, 2),
-            'total_mismatches': forward_mm + reverse_mm,
+            'total_mismatches': actual_fwd_mm + actual_rev_mm,  # Use alignment counts
+            'total_mismatches_primersearch': forward_mm + reverse_mm,  # Original primersearch count
             'p_amplification_forward': round(p_amp_fwd, 3),
             'p_amplification_reverse': round(p_amp_rev, 3),
             'p_amplification_overall': round(p_amp_overall, 3),
             'risk_classification': classification,
+
+            # Primer structure analysis
+            'forward_gc_content': structure_fwd['gc_content'],
+            'forward_self_dimer_risk': structure_fwd['self_dimer_risk'],
+            'forward_hairpin_risk': structure_fwd['hairpin_risk'],
+            'reverse_gc_content': structure_rev['gc_content'],
+            'reverse_self_dimer_risk': structure_rev['self_dimer_risk'],
+            'reverse_hairpin_risk': structure_rev['hairpin_risk'],
+
+            # Amplicon metrics
+            'amplicon_gc_content': amplicon_gc if amplicon_gc is not None else 'N/A',
 
             # PCR conditions used
             'annealing_temp': self.annealing_temp,
             'buffer_Na_mM': self.pcr_conditions.get('Na', 50.0),
             'buffer_Mg_mM': self.pcr_conditions.get('Mg', 2.0)
         }
+
+        # Add alignment data if available
+        if alignment_fwd:
+            result['forward_alignment'] = {
+                'alignment_text': alignment_fwd.get('alignment_text', ''),
+                'mismatch_positions': alignment_fwd.get('mismatch_positions', []),
+                'mismatch_details': alignment_fwd.get('mismatch_details', []),
+                'mismatch_count': alignment_fwd.get('mismatch_count', 0),
+                '3prime_mismatch_count': alignment_fwd.get('3prime_mismatch_count', 0),
+                'expanded_primer': alignment_fwd.get('expanded_primer', '')
+            }
+
+        if alignment_rev:
+            result['reverse_alignment'] = {
+                'alignment_text': alignment_rev.get('alignment_text', ''),
+                'mismatch_positions': alignment_rev.get('mismatch_positions', []),
+                'mismatch_details': alignment_rev.get('mismatch_details', []),
+                'mismatch_count': alignment_rev.get('mismatch_count', 0),
+                '3prime_mismatch_count': alignment_rev.get('3prime_mismatch_count', 0),
+                'expanded_primer': alignment_rev.get('expanded_primer', '')
+            }
+
+        return result
 
 
 def parse_primersearch_output(primersearch_file: Path) -> List[Dict]:
@@ -398,6 +514,377 @@ def parse_primersearch_output(primersearch_file: Path) -> List[Dict]:
             amplicons.append(current_amplicon)
 
     return amplicons
+
+
+def extract_genomic_sequence(genome_fasta: Path, position: int, length: int, strand: str) -> Optional[str]:
+    """
+    Extract genomic sequence at primer binding site
+
+    Args:
+        genome_fasta: Path to genome FASTA file
+        position: Binding position (1-indexed, as reported by primersearch)
+        length: Length to extract (primer length after cleaning IUPAC codes)
+        strand: 'forward' or 'reverse'
+
+    Returns:
+        Genomic sequence at binding site (in primer orientation), or None if failed
+    """
+    try:
+        # Load genome sequence (assume single-record FASTA for now)
+        record = next(SeqIO.parse(genome_fasta, 'fasta'))
+
+        # Convert to 0-indexed
+        pos_0idx = position - 1
+
+        if strand == 'forward':
+            # Extract forward sequence
+            binding_seq = str(record.seq[pos_0idx:pos_0idx + length])
+        else:
+            # For reverse strand, primersearch reports the end position
+            # We need to extract the sequence and reverse complement it
+            binding_seq = str(record.seq[pos_0idx - length + 1:pos_0idx + 1].reverse_complement())
+
+        return binding_seq
+
+    except Exception as e:
+        print(f"Warning: Failed to extract genomic sequence at position {position}: {e}", file=sys.stderr)
+        return None
+
+
+def count_primer_length(primer_seq: str) -> int:
+    """
+    Count the biological length of a primer sequence.
+    IUPAC codes like [ABC] count as 1 base, ? counts as 1 base.
+
+    Args:
+        primer_seq: Primer sequence with potential IUPAC codes
+
+    Returns:
+        Biological length in bases
+    """
+    # Count [ABC] as 1, ? as 1
+    length = 0
+    i = 0
+    while i < len(primer_seq):
+        if primer_seq[i] == '[':
+            # Skip until ]
+            while i < len(primer_seq) and primer_seq[i] != ']':
+                i += 1
+            length += 1
+            i += 1
+        else:
+            length += 1
+            i += 1
+    return length
+
+
+def expand_primer_to_match_genome(primer_seq: str, genomic_seq: str) -> str:
+    """
+    Expand degenerate primer by selecting variants that match the genomic sequence.
+
+    For each IUPAC ambiguity code in the primer, choose the variant that matches
+    the corresponding position in the genomic sequence. This ensures that when
+    primersearch reports 0 mismatches, the alignment will also show 0 mismatches.
+
+    Args:
+        primer_seq: Primer sequence with IUPAC codes (e.g., "AG[CAM]GTT[TCY]")
+        genomic_seq: Genomic sequence at binding site
+
+    Returns:
+        Expanded primer sequence using matching variants (e.g., "AGCGTTT")
+    """
+    expanded = []
+    primer_bio_pos = 0  # Position in biological primer (counting [ABC] as 1)
+    i = 0  # Position in primer string
+
+    while i < len(primer_seq):
+        if primer_seq[i] == '[':
+            # Find the closing bracket
+            close_idx = primer_seq.index(']', i)
+            variants = primer_seq[i+1:close_idx]
+
+            # Check which variant matches genome at this position
+            if primer_bio_pos < len(genomic_seq):
+                genome_base = genomic_seq[primer_bio_pos].upper()
+                if genome_base in variants:
+                    # Use the matching variant
+                    expanded.append(genome_base)
+                else:
+                    # No match - take first variant (shouldn't happen for intended targets)
+                    expanded.append(variants[0])
+            else:
+                # Genomic sequence too short - take first variant
+                expanded.append(variants[0])
+
+            primer_bio_pos += 1
+            i = close_idx + 1
+
+        elif primer_seq[i] == '?':
+            # Wildcard - use genome base if available
+            if primer_bio_pos < len(genomic_seq):
+                expanded.append(genomic_seq[primer_bio_pos])
+            else:
+                expanded.append('N')
+            primer_bio_pos += 1
+            i += 1
+
+        else:
+            # Regular base
+            expanded.append(primer_seq[i])
+            primer_bio_pos += 1
+            i += 1
+
+    return ''.join(expanded)
+
+
+def align_primer_to_genome(primer_seq: str, genomic_seq: str) -> Dict:
+    """
+    Perform pairwise alignment between primer and genomic sequence
+
+    Uses BioPython's PairwiseAligner to create detailed alignment showing
+    sequence identity (not complementary base pairing).
+
+    Args:
+        primer_seq: Primer sequence (may contain IUPAC ambiguity codes)
+        genomic_seq: Actual genomic sequence at binding site
+
+    Returns:
+        Dict with alignment string, mismatch positions, and mismatch counts
+    """
+    # Expand IUPAC ambiguity codes to match the genomic sequence
+    # This ensures intended targets show 0 mismatches when primersearch reports 0
+    expanded_primer = expand_primer_to_match_genome(primer_seq, genomic_seq)
+
+    # Also handle wildcards
+    clean_primer = re.sub(r'\?', 'N', expanded_primer)
+
+    # Handle cases where sequences don't match in length
+    if len(genomic_seq) == 0:
+        return {
+            'alignment_text': '',
+            'mismatch_positions': [],
+            'mismatch_count': 0,
+            '3prime_mismatch_count': 0,
+            'alignment_score': 0
+        }
+
+    # Create aligner - use global mode to align entire sequences
+    aligner = PairwiseAligner()
+    aligner.mode = 'global'
+    aligner.match_score = 1
+    aligner.mismatch_score = -1
+    aligner.open_gap_score = -2
+    aligner.extend_gap_score = -0.5
+
+    try:
+        # Perform alignment
+        alignments = aligner.align(clean_primer, genomic_seq)
+        if len(alignments) == 0:
+            raise ValueError("No alignment found")
+
+        best_alignment = alignments[0]
+
+        # Extract alignment strings
+        primer_aligned = str(best_alignment[0])
+        genome_aligned = str(best_alignment[1])
+
+        # Analyze mismatches
+        mismatches = []
+        mismatch_positions = []
+
+        # Track position in ungapped primer for accurate 3' distance calculation
+        ungapped_primer_pos = 0
+
+        for i, (p, g) in enumerate(zip(primer_aligned, genome_aligned)):
+            # Count ungapped positions in primer
+            if p != '-':
+                current_primer_pos = ungapped_primer_pos
+                ungapped_primer_pos += 1
+
+            if p != g and p != '-' and g != '-':
+                # Distance from 3' end in the ungapped primer
+                distance_from_3prime = len(clean_primer) - current_primer_pos - 1
+
+                mismatches.append({
+                    'position': i,  # Position in aligned sequence
+                    'primer_base': p,
+                    'genome_base': g,
+                    'distance_from_3prime': distance_from_3prime
+                })
+                mismatch_positions.append(i)
+
+        # Count 3' mismatches (last 5 bases, excluding gaps)
+        three_prime_threshold = 5
+        # Count mismatches in last 5 non-gap positions from 3' end
+        non_gap_positions = [m for m in mismatches if m['distance_from_3prime'] >= 0]
+        three_prime_mm = sum(1 for m in non_gap_positions if m['distance_from_3prime'] < three_prime_threshold)
+
+        # Count gaps
+        gap_count = sum(1 for p, g in zip(primer_aligned, genome_aligned) if p == '-' or g == '-')
+
+        # Generate alignment visualization text
+        match_string = ''
+        for p, g in zip(primer_aligned, genome_aligned):
+            if p == g:
+                match_string += '|'
+            elif p == '-' or g == '-':
+                match_string += ' '
+            else:
+                match_string += '.'
+
+        alignment_text = f"{primer_aligned}\n{match_string}\n{genome_aligned}"
+
+        # Add warning if there are many gaps (suggests extraction issue)
+        if gap_count > 3:
+            alignment_text += f"\nWarning: {gap_count} gaps in alignment - position extraction may be imprecise"
+
+        return {
+            'alignment_text': alignment_text,
+            'primer_aligned': primer_aligned,
+            'genome_aligned': genome_aligned,
+            'match_string': match_string,
+            'mismatch_positions': mismatch_positions,
+            'mismatch_details': mismatches,
+            'mismatch_count': len(mismatches),
+            '3prime_mismatch_count': three_prime_mm,
+            'alignment_score': float(best_alignment.score),
+            'expanded_primer': expanded_primer  # Show which variant matched
+        }
+
+    except Exception as e:
+        print(f"Warning: Alignment failed for {primer_seq[:20]}...: {e}", file=sys.stderr)
+        return {
+            'alignment_text': '',
+            'mismatch_positions': [],
+            'mismatch_count': 0,
+            '3prime_mismatch_count': 0,
+            'alignment_score': 0
+        }
+
+
+def calculate_gc_content(seq: str) -> float:
+    """
+    Calculate GC content as percentage
+
+    Args:
+        seq: DNA sequence
+
+    Returns:
+        GC content as percentage (0-100)
+    """
+    seq_upper = seq.upper()
+    gc_count = seq_upper.count('G') + seq_upper.count('C')
+    total = len(seq_upper)
+    return round((gc_count / total * 100), 2) if total > 0 else 0.0
+
+
+def check_self_dimer(seq: str) -> Dict:
+    """
+    Check for potential self-dimer formation using simple complementarity
+
+    This is a simplified check - looks for reverse-complementary regions
+    that could form stable dimers.
+
+    Args:
+        seq: Primer sequence
+
+    Returns:
+        Dict with dimer score and details
+    """
+    # Create reverse complement
+    complement_map = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
+    rev_comp = ''.join(complement_map.get(b, 'N') for b in reversed(seq.upper()))
+
+    # Look for complementary regions at 3' end (most critical for extension)
+    max_match = 0
+    for i in range(len(seq) - 2):  # Check last 3+ bases
+        matches = 0
+        for j in range(min(len(seq) - i, 6)):  # Check up to 6 bases
+            if i + j < len(seq) and j < len(rev_comp):
+                if seq[-(i+j+1)] == rev_comp[j]:
+                    matches += 1
+                else:
+                    break
+        max_match = max(max_match, matches)
+
+    # Score based on consecutive matches at 3' end
+    # >4 consecutive matches at 3' end = high dimer risk
+    dimer_risk = 'high' if max_match >= 4 else ('medium' if max_match == 3 else 'low')
+
+    return {
+        'max_3prime_complementarity': max_match,
+        'dimer_risk': dimer_risk
+    }
+
+
+def check_hairpin(seq: str) -> Dict:
+    """
+    Check for potential hairpin formation using palindrome detection
+
+    Simplified hairpin check - looks for inverted repeats that could
+    form stable secondary structures.
+
+    Args:
+        seq: Primer sequence
+
+    Returns:
+        Dict with hairpin score and details
+    """
+    complement_map = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
+
+    max_stem_length = 0
+    hairpin_positions = []
+
+    # Check for palindromic regions (potential hairpin stems)
+    for i in range(len(seq) - 3):  # Minimum stem = 3bp
+        for j in range(i + 4, min(i + 12, len(seq))):  # Loop 4-12 bases
+            stem_len = 0
+            # Check for reverse complement after the loop
+            for k in range(min(len(seq) - j, j - i - 3)):
+                if seq[i + k].upper() in complement_map:
+                    comp_base = complement_map[seq[i + k].upper()]
+                    if j + k < len(seq) and seq[j + k].upper() == comp_base:
+                        stem_len += 1
+                    else:
+                        break
+            if stem_len >= 3:
+                max_stem_length = max(max_stem_length, stem_len)
+                hairpin_positions.append((i, j, stem_len))
+
+    # Score based on stem length
+    # >5bp stem = high hairpin risk (very stable)
+    # 4-5bp stem = medium risk
+    # <4bp stem = low risk
+    hairpin_risk = 'high' if max_stem_length >= 5 else ('medium' if max_stem_length >= 4 else 'low')
+
+    return {
+        'max_stem_length': max_stem_length,
+        'hairpin_risk': hairpin_risk,
+        'hairpin_count': len(hairpin_positions)
+    }
+
+
+def analyze_primer_structure(seq: str) -> Dict:
+    """
+    Comprehensive primer structure analysis
+
+    Args:
+        seq: Primer sequence
+
+    Returns:
+        Dict with GC content and secondary structure predictions
+    """
+    gc_content = calculate_gc_content(seq)
+    self_dimer = check_self_dimer(seq)
+    hairpin = check_hairpin(seq)
+
+    return {
+        'gc_content': gc_content,
+        'self_dimer_score': self_dimer['max_3prime_complementarity'],
+        'self_dimer_risk': self_dimer['dimer_risk'],
+        'hairpin_stem_length': hairpin['max_stem_length'],
+        'hairpin_risk': hairpin['hairpin_risk']
+    }
 
 
 def load_pcr_conditions(master_mix_file: Path, master_mix_name: str) -> Dict:
@@ -470,6 +957,8 @@ def main():
                        help='Input primersearch output file')
     parser.add_argument('primers_file', type=Path,
                        help='Primers file (EMBOSS format)')
+    parser.add_argument('--genome-fasta', type=Path,
+                       help='Genome FASTA file for extracting binding sequences and alignments')
     parser.add_argument('--reference', type=Path,
                        help='Reference target sequences (FASTA)')
     parser.add_argument('--genome-name', type=str,
@@ -510,12 +999,15 @@ def main():
         pcr_conditions=pcr_conditions,
         primers=primers,
         references=references,
+        genome_fasta=args.genome_fasta,
         annealing_temp=args.annealing_temp,
         delta_tm_thresholds=(args.delta_tm_high, args.delta_tm_medium)
     )
 
     # Analyze each amplicon
     print(f"Analyzing {len(amplicons)} amplicons...", file=sys.stderr)
+    if args.genome_fasta:
+        print(f"Using genome FASTA for precise alignment analysis: {args.genome_fasta}", file=sys.stderr)
     results = []
 
     # Use provided genome name or extract from primersearch output
@@ -535,7 +1027,9 @@ def main():
             reverse_seq=amp['reverse_seq'],
             forward_mm=amp['forward_mm'],
             reverse_mm=amp['reverse_mm'],
-            amplicon_length=amp.get('amplicon_length', 0)
+            amplicon_length=amp.get('amplicon_length', 0),
+            forward_pos=amp.get('forward_pos'),
+            reverse_pos=amp.get('reverse_pos')
         )
         results.append(analysis)
 

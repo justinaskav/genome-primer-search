@@ -29,7 +29,3 @@ Gemella morbillorum
 Solobacterium moorei
 Campylobacter jejuni
 Clostridioides difficile
-
-# === TEST GENOME (SMALL) ===
-# Mycoplasma genitalium - ~580 kb genome for testing accession downloads
-GCA_000005845.2

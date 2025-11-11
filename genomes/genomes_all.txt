@@ -1,12 +1,10 @@
 Faecalibacterium prausnitzii
-Akkermansia muciniphila
 Bacteroides thetaiotaomicron
 Bacteroides vulgatus
 Eubacterium rectale
 Roseburia intestinalis
 Roseburia faecis
 Anaerostipes hadrus
-Clostridium scindens
 Coprococcus eutactus
 Bifidobacterium longum
 Bifidobacterium adolescentis
@@ -27,15 +25,12 @@ Ruminococcus bromii
 Alistipes putredinis
 Streptococcus sanguinis
 Flavonifractor plautii
-Escherichia coli
 Anaerotignum lactatifermentans
 Bacteroides ovatus
 Bacteroides uniformis
 Bacteroides faecis
 Bacteroides cellulosilyticus
 Lactiplantibacillus plantarum
-Ruminococcus gnavus
-Bacteroides fragilis
 Intestinibacter bartlettii
 Akkermansia biwaensis
 Fusicatenibacter saccharivorans
@@ -43,7 +38,6 @@ Butyricimonas virosa
 Dialister invisus
 Megamonas funiformis
 Megasphaera elsdenii
-Enterococcus faecalis
 Staphylococcus epidermidis
 Klebsiella pneumoniae
 Bacteroides stercoris
@@ -52,13 +46,9 @@ Bacteroides coprocola
 Faecalibacterium longum
 Faecalibacterium duncaniae
 Faecalibacterium taiwanense
-Ruminococcus torques
 Actinomyces naeslundii
 Raoultella terrigena
 Bacteroides xylanisolvens
-Flavonifractor sp002161085
-Streptococcus sp001587175
-Pauljensenia sp000466265
 Mediterraneibacter gnavus
 Bifidobacterium bifidum
 Bifidobacterium breve
@@ -76,13 +66,56 @@ Coprococcus catus
 Eggerthella lenta
 Rothia mucilaginosa
 Veillonella parvula
-Clostridium leptum
+Ruminiclostridium leptum
 Clostridium bolteae
 Actinomyces odontolyticus
 Erysipelatoclostridium ramosum
 Oscillibacter valericigenes
-Lachnospiraceae bacterium 1-t
 Clostridium hathewayi
-Faecalicatena gnavus
+Ruminococcus gnavus
 Alistipes onderdonkii
 Phascolarctobacterium faecium
+Homo sapiens
+
+# Homo sapiens haplogroup H8 mitochondrion, complete genome (Accession no. MN986463.1) 100% identity
+MN986463.1
+
+# Homo sapiens haplogroup V13 mitochondrion, complete genome
+MF097962.1
+
+## CRC-associated
+Fusobacterium nucleatum
+Bacteroides fragilis
+Escherichia coli
+Enterococcus faecalis
+Peptostreptococcus anaerobius
+Parvimonas micra
+Porphyromonas asaccharolytica
+[Clostridium] symbiosum
+Streptococcus gallolyticus
+Prevotella intermedia
+Prevotella intermeia
+Alistipes finegoldii
+Akkermansia muciniphila
+
+# Additional CRC-associated bacteria
+Peptostreptococcus stomatis
+Gemella morbillorum
+Solobacterium moorei
+Campylobacter jejuni
+Clostridioides difficile
+
+Anaerococcus vaginalis
+
+# Positive control TetA gene
+L20800.1
+Pseudomonas aureofaciens
+Pseudomonda putida
+Stenotrophomonas maltophilia
+Acinetobacter calcoaceticus
+Pseudomonas aeruginosa
+Rhodococcus erythropolis
+
+Bacillus subtilis
+Bacillus cereus
+Burkholderia cepacia

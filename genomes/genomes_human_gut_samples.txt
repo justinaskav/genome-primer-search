@@ -1,0 +1,111 @@
+Faecalibacterium prausnitzii
+Bacteroides thetaiotaomicron
+Bacteroides vulgatus
+Eubacterium rectale
+Roseburia intestinalis
+Roseburia faecis
+Anaerostipes hadrus
+Coprococcus eutactus
+Bifidobacterium longum
+Bifidobacterium adolescentis
+Blautia obeum
+Blautia hansenii
+Blautia hydrogenotrophica
+Parabacteroides distasonis
+Parabacteroides merdae
+Phocaeicola vulgatus
+Phocaeicola dorei
+Collinsella aerofaciens
+Enterocloster aldenensis
+Dorea longicatena
+Lachnospira eligens
+Butyricicoccus pullicaecorum
+Methanobrevibacter smithii
+Ruminococcus bromii
+Alistipes putredinis
+Streptococcus sanguinis
+Flavonifractor plautii
+Anaerotignum lactatifermentans
+Bacteroides ovatus
+Bacteroides uniformis
+Bacteroides faecis
+Bacteroides cellulosilyticus
+Lactiplantibacillus plantarum
+Intestinibacter bartlettii
+Akkermansia biwaensis
+Fusicatenibacter saccharivorans
+Butyricimonas virosa
+Dialister invisus
+Megamonas funiformis
+Megasphaera elsdenii
+Staphylococcus epidermidis
+Klebsiella pneumoniae
+Bacteroides stercoris
+Prevotella copri
+Bacteroides coprocola
+Faecalibacterium longum
+Faecalibacterium duncaniae
+Faecalibacterium taiwanense
+Actinomyces naeslundii
+Raoultella terrigena
+Bacteroides xylanisolvens
+Mediterraneibacter gnavus
+Bifidobacterium bifidum
+Bifidobacterium breve
+Parabacteroides goldsteinii
+Dialister pneumosintes
+Bifidobacterium animalis
+Lactobacillus acidophilus
+Prevotella stercorea
+Akkermansia glycaniphila
+Bacteroides eggerthii
+Ruminococcus albus
+Eubacterium hallii
+Eubacterium limosum
+Coprococcus catus
+Eggerthella lenta
+Rothia mucilaginosa
+Veillonella parvula
+Ruminiclostridium leptum
+Clostridium bolteae
+Actinomyces odontolyticus
+Erysipelatoclostridium ramosum
+Oscillibacter valericigenes
+Clostridium hathewayi
+Ruminococcus gnavus
+Alistipes onderdonkii
+Phascolarctobacterium faecium
+Homo sapiens
+
+# Homo sapiens haplogroup H8 mitochondrion, complete genome (Accession no. MN986463.1) 100% identity
+MN986463.1
+
+# Homo sapiens haplogroup V13 mitochondrion, complete genome
+MF097962.1
+
+## CRC-associated
+Fusobacterium nucleatum
+Bacteroides fragilis
+Escherichia coli
+Enterococcus faecalis
+Peptostreptococcus anaerobius
+Parvimonas micra
+Porphyromonas asaccharolytica
+[Clostridium] symbiosum
+Streptococcus gallolyticus
+Prevotella intermedia
+Prevotella intermeia
+Alistipes finegoldii
+Akkermansia muciniphila
+
+# Additional CRC-associated bacteria
+Peptostreptococcus stomatis
+Gemella morbillorum
+Solobacterium moorei
+Campylobacter jejuni
+Clostridioides difficile
+
+Anaerococcus vaginalis
+
+# Positive control TetA gene
+L20800.1

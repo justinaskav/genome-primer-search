@@ -388,6 +388,96 @@ Primer	Total_Hits	High_Risk_OffTargets	Specificity_Score	Specificity_Rating
 - **ΔTm < 5°C**: Off-target likely to amplify under standard conditions
 - **Perfect match (0 mismatches) to off-target**: Strong cross-reactivity risk
 
+### Understanding Alignment Results
+
+The thermodynamic report includes detailed primer-genome alignments with the following features:
+
+#### Degenerate Primers and Variant Selection
+
+**What are degenerate primers?** Primers containing IUPAC ambiguity codes like `[TCY]` (T or C or Y) represent multiple possible sequences. For example, `AG[TCY]GTT` represents 3 different primers: `AGTGTT`, `AGCGTT`, and `AGYGTT`.
+
+**How alignment works:**
+1. EMBOSS primersearch matches primers using **all possible variants** (IUPAC-aware matching)
+2. Our alignment tool selects the **best matching variant** for visualization
+3. For each degenerate position `[ABC]`, the base that matches the genome is selected
+
+**Example:**
+```
+Degenerate primer: AG[CAM]GTT[TCY]GAT
+Genome sequence:   AGAGTTTGAT
+Matched variant:   AGAGTTTGAT  (selects A from [CAM], T from [TCY])
+```
+
+#### Two Mismatch Counts
+
+You'll see two different mismatch counts displayed:
+
+1. **Variant mismatches** (shown in alignment): Mismatches between the selected variant and the genome
+2. **Degenerate mismatches** (primersearch count): Mismatches considering all possible variants
+
+**When they differ:**
+```
+Forward: 4 variant mismatches | 0 degenerate mismatches (1 at 3' end)
+```
+
+This means:
+- The selected variant has 4 mismatches with the genome
+- But another variant exists (from the degenerate code) that matches perfectly
+- Primersearch found 0 mismatches because it tries all variants
+
+**Why this matters:** For **intended targets** with 0 degenerate mismatches, this indicates the primer is working correctly - one of its variants matches perfectly. For **off-targets**, having many variant mismatches but few degenerate mismatches suggests the degenerate codes are helping the primer bind broadly.
+
+#### Interpreting Intended Target Results
+
+**Expected for perfect intended targets:**
+- Degenerate mismatches: 0
+- Variant mismatches: 0 (if all degenerate positions happen to match)
+- ΔTm: 0°C
+- P(Amplification): 1.0
+
+**If you see mismatches on intended targets:**
+- Check the "Matched Variant" section to see which specific variant was used
+- Non-zero variant mismatches with 0 degenerate mismatches is expected when primers contain ambiguity codes
+- The alignment shows one specific variant path through the degenerate code space
+
+#### 3' End Mismatches
+
+Mismatches within the **last 5 bases** from the 3' end are critical for PCR:
+- DNA polymerase extends from the 3' end
+- Even 1 mismatch at the 3' end significantly reduces amplification efficiency
+- Mismatches at position 0-1 from 3' end: ~90% reduction in efficiency
+- Mismatches at position 2-4 from 3' end: ~50% reduction in efficiency
+- Mismatches at 5+ from 3' end: Minimal effect
+
+The report highlights these as they're more important than 5' mismatches.
+
+#### Gaps in Alignment
+
+**What gaps mean:**
+```
+CCTACG--GGCGGCT-GCAG
+.|  ||  ||| .|| ||||
+GC--CGGTGGC-ACTGGCAG
+Warning: 6 gaps in alignment
+```
+
+Multiple gaps (>3) indicate:
+- Position extraction may be imprecise
+- Could occur at sequence boundaries
+- Complex primers with repetitive regions
+- The genomic context doesn't allow perfect alignment
+
+**This doesn't mean the result is wrong** - primersearch found the binding site. But the alignment is showing you that visualizing it as a linear match is challenging.
+
+#### Color Coding
+
+In the HTML report:
+- **Green**: 0 mismatches (perfect match)
+- **Yellow**: 1-2 mismatches (acceptable)
+- **Red**: 3+ mismatches (potentially problematic)
+
+These colors apply to the variant mismatch count shown in the alignment.
+
 ## Troubleshooting
 
 **No genome file found:**

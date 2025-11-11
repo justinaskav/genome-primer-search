@@ -6,7 +6,7 @@ process THERMODYNAMIC_ANALYSIS {
     conda 'conda-forge::biopython'
 
     input:
-    tuple val(genome_input), path(primersearch_file)
+    tuple val(genome_input), path(primersearch_file), path(genome_fasta)
     path primers
     path reference
     val master_mix
@@ -24,6 +24,7 @@ process THERMODYNAMIC_ANALYSIS {
     thermodynamic_analysis.py \\
         ${primersearch_file} \\
         ${primers} \\
+        --genome-fasta ${genome_fasta} \\
         ${reference_arg} \\
         --genome-name "${genome_input}" \\
         --master-mix ${master_mix} \\

@@ -212,6 +212,105 @@ def generate_primer_specificity(results: List[Dict], output_file: Path):
             f.write('\t'.join(map(str, row)) + '\n')
 
 
+def format_alignment_html(result: Dict, row_id: str) -> str:
+    """
+    Format alignment data as HTML for expandable row
+
+    Args:
+        result: Amplicon result dict with alignment data
+        row_id: Unique row identifier
+
+    Returns:
+        HTML string with alignment visualization
+    """
+    if 'forward_alignment' not in result and 'reverse_alignment' not in result:
+        return ""
+
+    html = f'<div class="alignment-container">'
+
+    # Show original primers with IUPAC codes
+    fwd_primer_orig = result.get('forward_primer_seq', '')
+    rev_primer_orig = result.get('reverse_primer_seq', '')
+
+    html += f'<div style="margin-bottom: 10px; font-size: 12px; color: #666;">'
+    html += f'<strong>Original Primers (degenerate):</strong><br>'
+    html += f'Forward: <code>{fwd_primer_orig}</code><br>'
+    html += f'Reverse: <code>{rev_primer_orig}</code>'
+    html += '</div>'
+
+    # Show matched variants (what was actually aligned)
+    fwd_expanded = ''
+    rev_expanded = ''
+    if 'forward_alignment' in result:
+        fwd_expanded = result['forward_alignment'].get('expanded_primer', '')
+    if 'reverse_alignment' in result:
+        rev_expanded = result['reverse_alignment'].get('expanded_primer', '')
+
+    if fwd_expanded or rev_expanded:
+        html += f'<div style="margin-bottom: 10px; font-size: 12px; color: #2c5f2d; background: #e8f5e9; padding: 5px; border-left: 3px solid #4caf50;">'
+        html += f'<strong>Matched Variant (used for alignment):</strong><br>'
+        if fwd_expanded:
+            html += f'Forward: <code>{fwd_expanded}</code><br>'
+        if rev_expanded:
+            html += f'Reverse: <code>{rev_expanded}</code>'
+        html += '</div>'
+
+    # Forward primer alignment
+    if 'forward_alignment' in result and result['forward_alignment'].get('alignment_text'):
+        fwd_align = result['forward_alignment']
+        # Use the precise mismatch counts from alignment
+        fwd_mm = fwd_align.get('mismatch_count', 0)
+        fwd_3prime_mm = fwd_align.get('3prime_mismatch_count', 0)
+        fwd_mm_ps = result.get('forward_mismatches_primersearch', fwd_mm)
+
+        # Color code based on mismatches
+        if fwd_mm == 0:
+            mm_class = 'match-good'
+        elif fwd_mm <= 2:
+            mm_class = 'match-warn'
+        else:
+            mm_class = 'match-bad'
+
+        # Always show both counts for transparency and consistency
+        mm_display = f'{fwd_mm} variant mismatch{"es" if fwd_mm != 1 else ""} | {fwd_mm_ps} degenerate mismatch{"es" if fwd_mm_ps != 1 else ""}'
+
+        html += f'''
+        <div class="alignment-header {mm_class}">
+            Forward: {mm_display} ({fwd_3prime_mm} at 3' end)
+        </div>
+        <div class="alignment-text">{fwd_align['alignment_text']}</div>
+        '''
+
+    # Reverse primer alignment
+    if 'reverse_alignment' in result and result['reverse_alignment'].get('alignment_text'):
+        rev_align = result['reverse_alignment']
+        # Use the precise mismatch counts from alignment
+        rev_mm = rev_align.get('mismatch_count', 0)
+        rev_3prime_mm = rev_align.get('3prime_mismatch_count', 0)
+        rev_mm_ps = result.get('reverse_mismatches_primersearch', rev_mm)
+
+        # Color code based on mismatches
+        if rev_mm == 0:
+            mm_class = 'match-good'
+        elif rev_mm <= 2:
+            mm_class = 'match-warn'
+        else:
+            mm_class = 'match-bad'
+
+        # Always show both counts for transparency and consistency
+        mm_display = f'{rev_mm} variant mismatch{"es" if rev_mm != 1 else ""} | {rev_mm_ps} degenerate mismatch{"es" if rev_mm_ps != 1 else ""}'
+
+        html += f'''
+        <div class="alignment-header {mm_class}" style="margin-top: 15px;">
+            Reverse: {mm_display} ({rev_3prime_mm} at 3' end)
+        </div>
+        <div class="alignment-text">{rev_align['alignment_text']}</div>
+        '''
+
+    html += '</div>'
+    return html
+
+
 def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         offtarget_file: Path, specificity_file: Path):
     """Generate interactive HTML report"""
@@ -357,6 +456,67 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
         .dataTables_wrapper {{
             padding: 20px 0;
         }}
+        .alignment-row {{
+            display: none;
+            background: #f8f9fa;
+        }}
+        .alignment-row.show {{
+            display: table-row;
+        }}
+        .alignment-container {{
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            background: white;
+            border-radius: 4px;
+            margin: 10px;
+        }}
+        .alignment-header {{
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }}
+        .alignment-text {{
+            white-space: pre;
+            color: #333;
+        }}
+        .match-good {{
+            color: #28a745;
+        }}
+        .match-warn {{
+            color: #ffc107;
+        }}
+        .match-bad {{
+            color: #dc3545;
+        }}
+        .mismatch-3prime {{
+            font-weight: bold;
+            color: #dc3545;
+            background: #ffe5e5;
+        }}
+        .expand-btn {{
+            cursor: pointer;
+            color: #007bff;
+            text-decoration: underline;
+            font-size: 12px;
+        }}
+        .expand-btn:hover {{
+            color: #0056b3;
+        }}
+        .mismatch-indicator {{
+            display: inline-block;
+            width: 100%;
+            height: 4px;
+            background: #e9ecef;
+            position: relative;
+            margin-top: 5px;
+        }}
+        .mismatch-bar {{
+            position: absolute;
+            height: 100%;
+            background: linear-gradient(to right, #ffc107, #dc3545);
+        }}
     </style>
 </head>
 <body>
@@ -402,6 +562,27 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             High risk < {metadata['delta_tm_thresholds']['high_risk']}°C,
             Medium risk < {metadata['delta_tm_thresholds']['medium_risk']}°C
         </div>
+
+        <div class="section" style="background: #e3f2fd; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: #1565C0;">Understanding Alignment Results</h3>
+            <p><strong>Degenerate Primers:</strong> Primers containing IUPAC ambiguity codes (e.g., [TCY] = T or C or Y)
+            represent multiple variants. Primersearch matches any variant, but alignments show one specific variant.</p>
+
+            <p><strong>Two Mismatch Counts:</strong></p>
+            <ul style="margin: 5px 0;">
+                <li><strong>Variant mismatches:</strong> Mismatches between the selected variant and genome sequence (shown in alignment)</li>
+                <li><strong>Degenerate mismatches:</strong> Mismatches considering all possible primer variants (primersearch count)</li>
+            </ul>
+
+            <p><strong>Matched Variant:</strong> For each degenerate position, the variant that best matches the genome is selected.
+            For intended targets with 0 degenerate mismatches, the alignment should show perfect matches.</p>
+
+            <p><strong>3' End Mismatches:</strong> Mismatches within the last 5 bases from the 3' end are critical for PCR extension.
+            Even 1 mismatch at the 3' end can significantly reduce amplification efficiency.</p>
+
+            <p><strong>Gaps in Alignment:</strong> Multiple gaps (>3) suggest position extraction may be imprecise.
+            This can occur at sequence boundaries or with complex primers.</p>
+        </div>
 """
 
     # Add Primer Specificity section
@@ -442,6 +623,64 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
         </div>
 """
 
+    # Add Primer QC section (GC content and secondary structure)
+    # Aggregate primer-level metrics (one entry per primer)
+    primer_qc_data = {}
+    for r in results:
+        pname = r['primer_name']
+        if pname not in primer_qc_data:
+            primer_qc_data[pname] = {
+                'fwd_gc': r.get('forward_gc_content', 'N/A'),
+                'rev_gc': r.get('reverse_gc_content', 'N/A'),
+                'fwd_dimer': r.get('forward_self_dimer_risk', 'N/A'),
+                'rev_dimer': r.get('reverse_self_dimer_risk', 'N/A'),
+                'fwd_hairpin': r.get('forward_hairpin_risk', 'N/A'),
+                'rev_hairpin': r.get('reverse_hairpin_risk', 'N/A')
+            }
+
+    if primer_qc_data:
+        html += """
+        <div class="section">
+            <h2>Primer Quality Control</h2>
+            <p>GC content and secondary structure analysis for primer pairs.</p>
+            <table id="primerQCTable" class="display">
+                <thead>
+                    <tr>
+                        <th>Primer</th>
+                        <th>Forward GC%</th>
+                        <th>Reverse GC%</th>
+                        <th>Fwd Dimer Risk</th>
+                        <th>Rev Dimer Risk</th>
+                        <th>Fwd Hairpin Risk</th>
+                        <th>Rev Hairpin Risk</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+        for pname, qc in sorted(primer_qc_data.items()):
+            # Color code risk levels
+            fwd_dimer_class = 'risk-high' if qc['fwd_dimer'] == 'high' else ('risk-medium' if qc['fwd_dimer'] == 'medium' else 'risk-low')
+            rev_dimer_class = 'risk-high' if qc['rev_dimer'] == 'high' else ('risk-medium' if qc['rev_dimer'] == 'medium' else 'risk-low')
+            fwd_hairpin_class = 'risk-high' if qc['fwd_hairpin'] == 'high' else ('risk-medium' if qc['fwd_hairpin'] == 'medium' else 'risk-low')
+            rev_hairpin_class = 'risk-high' if qc['rev_hairpin'] == 'high' else ('risk-medium' if qc['rev_hairpin'] == 'medium' else 'risk-low')
+
+            html += f"""
+                    <tr>
+                        <td>{pname}</td>
+                        <td>{qc['fwd_gc']}</td>
+                        <td>{qc['rev_gc']}</td>
+                        <td class="{fwd_dimer_class}">{qc['fwd_dimer']}</td>
+                        <td class="{rev_dimer_class}">{qc['rev_dimer']}</td>
+                        <td class="{fwd_hairpin_class}">{qc['fwd_hairpin']}</td>
+                        <td class="{rev_hairpin_class}">{qc['rev_hairpin']}</td>
+                    </tr>
+"""
+        html += """
+                </tbody>
+            </table>
+        </div>
+"""
+
     # Add Intended Target Validation section
     target_amplicons = [r for r in results if r['is_intended_target']]
     if target_amplicons:
@@ -462,12 +701,15 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                 <tbody>
 """
         for r in target_amplicons:  # Show all
+            # Use primersearch mismatch count for intended targets
+            # (primersearch is IUPAC-aware, so this reflects what the user specified)
+            mm_count = r.get('total_mismatches_primersearch', r['total_mismatches'])
             html += f"""
                     <tr>
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
                         <td>{r['amplicon_length']}</td>
-                        <td>{r['total_mismatches']}</td>
+                        <td>{mm_count}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
                     </tr>
 """
@@ -542,19 +784,32 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         <th>P(Amplification)</th>
                         <th>ΔTm (°C)</th>
                         <th>Mismatches</th>
+                        <th>Alignment</th>
                     </tr>
                 </thead>
                 <tbody>
 """
-        for r in high_risk_offtargets:  # Show all
+        for idx, r in enumerate(high_risk_offtargets):  # Show all
+            row_id = f"high_risk_{idx}"
+            has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
+
+            if has_alignment:
+                alignment_html = format_alignment_html(r, row_id)
+                # Store alignment data in data attribute for dynamic injection
+                alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
+                alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
+            else:
+                alignment_btn = 'N/A'
+
             html += f"""
-                    <tr>
+                    <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
                         <td>{r['amplicon_length']}</td>
                         <td>{r['p_amplification_overall']:.3f}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
                         <td>{r['total_mismatches']}</td>
+                        <td>{alignment_btn}</td>
                     </tr>
 """
         html += "                </tbody>\n            </table>\n"
@@ -585,19 +840,31 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         <th>P(Amplification)</th>
                         <th>ΔTm (°C)</th>
                         <th>Mismatches</th>
+                        <th>Alignment</th>
                     </tr>
                 </thead>
                 <tbody>
 """
-        for r in medium_risk_offtargets:
+        for idx, r in enumerate(medium_risk_offtargets):
+            row_id = f"medium_risk_{idx}"
+            has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
+
+            if has_alignment:
+                alignment_html = format_alignment_html(r, row_id)
+                alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
+                alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
+            else:
+                alignment_btn = 'N/A'
+
             html += f"""
-                    <tr>
+                    <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
                         <td>{r['amplicon_length']}</td>
                         <td>{r['p_amplification_overall']:.3f}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
                         <td>{r['total_mismatches']}</td>
+                        <td>{alignment_btn}</td>
                     </tr>
 """
         html += "                </tbody>\n            </table>\n"
@@ -628,19 +895,31 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         <th>P(Amplification)</th>
                         <th>ΔTm (°C)</th>
                         <th>Mismatches</th>
+                        <th>Alignment</th>
                     </tr>
                 </thead>
                 <tbody>
 """
-        for r in low_risk_offtargets:
+        for idx, r in enumerate(low_risk_offtargets):
+            row_id = f"low_risk_{idx}"
+            has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
+
+            if has_alignment:
+                alignment_html = format_alignment_html(r, row_id)
+                alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
+                alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
+            else:
+                alignment_btn = 'N/A'
+
             html += f"""
-                    <tr>
+                    <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
                         <td>{r['amplicon_length']}</td>
                         <td>{r['p_amplification_overall']:.3f}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
                         <td>{r['total_mismatches']}</td>
+                        <td>{alignment_btn}</td>
                     </tr>
 """
         html += "                </tbody>\n            </table>\n"
@@ -672,6 +951,11 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                 order: [[4, 'desc']]  // Sort by Specificity Score descending
             }});
 
+            $('#primerQCTable').DataTable({{
+                pageLength: 25,
+                order: [[0, 'asc']]  // Sort by Primer name ascending
+            }});
+
             $('#targetsTable').DataTable({{
                 pageLength: 25,
                 order: [[0, 'asc']]  // Sort by Primer name ascending
@@ -697,6 +981,32 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                 order: [[3, 'desc']]  // Sort by P(Amplification) descending
             }});
         }});
+
+        // Toggle alignment visibility with dynamic row injection
+        function toggleAlignment(rowId, btnElement) {{
+            const parentRow = btnElement.closest('tr');
+            const existingAlignmentRow = parentRow.nextElementSibling;
+
+            // Check if alignment row already exists
+            if (existingAlignmentRow && existingAlignmentRow.classList.contains('alignment-row')) {{
+                // Remove it
+                existingAlignmentRow.remove();
+                btnElement.textContent = 'Show';
+            }} else {{
+                // Create and insert alignment row
+                const alignmentData = btnElement.getAttribute('data-alignment');
+                if (alignmentData) {{
+                    const newRow = document.createElement('tr');
+                    newRow.className = 'alignment-row show';
+                    newRow.id = rowId;
+                    newRow.innerHTML = '<td colspan="7">' + alignmentData + '</td>';
+
+                    // Insert after current row
+                    parentRow.parentNode.insertBefore(newRow, parentRow.nextSibling);
+                    btnElement.textContent = 'Hide';
+                }}
+            }}
+        }}
     </script>
 </body>
 </html>
