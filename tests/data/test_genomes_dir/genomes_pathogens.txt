@@ -1,0 +1,11 @@
+# Test genome list: Pathogenic bacteria
+# Additional genomes for directory testing
+
+# Streptococcus pneumoniae (small genome ~2.1Mb)
+GCA_000006885.1
+
+# Comments and blank lines should be filtered
+
+# Empty lines below should be ignored too
+
+

@@ -1,12 +1,3 @@
-# Genome Input File
-# This file supports two input formats:
-#   1. Organism taxon names (e.g., "Escherichia coli")
-#   2. Assembly accession IDs (e.g., "GCA_000005845.2")
-# Lines starting with # are comments and will be ignored
-
-# === HUMAN GENOME ===
-# Homo sapiens
-
 # === CRC-ASSOCIATED BACTERIA ===
 # Core bacterial species associated with colorectal cancer
 

@@ -1,58 +1,118 @@
 #!/bin/bash
-# Test script for Genome Primer Search Pipeline
-# Runs a quick validation test with small genomes
+# Comprehensive Test Runner for Genome Primer Search Pipeline
+# Runs multiple test scenarios to validate pipeline functionality
 
 set -e
 
+# Color codes for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
 # Parse command line arguments
+TEST_MODE="all"
 ENABLE_THERMO=false
-if [[ "$1" == "--with-thermo" ]]; then
-    ENABLE_THERMO=true
-fi
 
-echo "================================"
-echo "Running pipeline test..."
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --single)
+            TEST_MODE="single"
+            shift
+            ;;
+        --directory)
+            TEST_MODE="directory"
+            shift
+            ;;
+        --all)
+            TEST_MODE="all"
+            shift
+            ;;
+        --with-thermo)
+            ENABLE_THERMO=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--single|--directory|--all] [--with-thermo]"
+            exit 1
+            ;;
+    esac
+done
+
+echo ""
+echo "=================================================="
+echo "  Genome Primer Search Pipeline - Test Suite"
+echo "=================================================="
+echo ""
+
+# Build thermo flag
+THERMO_FLAG=""
 if [ "$ENABLE_THERMO" = true ]; then
-    echo "With thermodynamic analysis"
+    THERMO_FLAG="--with-thermo"
+    echo -e "${YELLOW}Thermodynamic analysis: ENABLED${NC}"
+else
+    echo "Thermodynamic analysis: disabled"
 fi
-echo "================================"
 echo ""
 
-# Build Nextflow command
-NF_CMD="nextflow run main.nf \
-    --genomes tests/data/test_genomes.txt \
-    --primers tests/data/test_primers.txt \
-    --outdir test_output \
-    -resume"
+# Run tests based on mode
+if [ "$TEST_MODE" = "all" ] || [ "$TEST_MODE" = "single" ]; then
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}TEST 1: Single Genome File Input${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    bash tests/test_single_file.sh $THERMO_FLAG
 
-# Add thermodynamic analysis if requested
-if [ "$ENABLE_THERMO" = true ]; then
-    NF_CMD="$NF_CMD \
-    --enable_thermo_analysis \
-    --thermo_references tests/data/test_references.fasta \
-    --thermo_master_mix DreamTaq \
-    --thermo_annealing_temp 60"
-fi
-
-# Run pipeline with test data
-eval $NF_CMD
-
-echo ""
-echo "================================"
-echo "Test completed successfully!"
-echo "================================"
-echo ""
-echo "Check results in: test_output/"
-echo "  - test_output/results/genomes/      Downloaded genomes"
-echo "  - test_output/results/filtered/     Filtered amplicons"
-echo "  - test_output/reports/summary.html  HTML report"
-echo "  - test_output/reports/summary.tsv   TSV summary"
-
-if [ "$ENABLE_THERMO" = true ]; then
-    echo "  - test_output/thermo_reports/       Thermodynamic analysis"
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ Single file test PASSED${NC}"
+    else
+        echo "✗ Single file test FAILED"
+        exit 1
+    fi
+    echo ""
 fi
 
+if [ "$TEST_MODE" = "all" ] || [ "$TEST_MODE" = "directory" ]; then
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}TEST 2: Directory Input (Multiple Files)${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    bash tests/test_directory.sh $THERMO_FLAG
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ Directory test PASSED${NC}"
+    else
+        echo "✗ Directory test FAILED"
+        exit 1
+    fi
+    echo ""
+fi
+
 echo ""
-echo "Usage:"
-echo "  bash tests/run_test.sh              # Basic test"
-echo "  bash tests/run_test.sh --with-thermo  # Test with thermodynamic analysis"
+echo "=================================================="
+echo -e "${GREEN}  ✓ All tests completed successfully!${NC}"
+echo "=================================================="
+echo ""
+echo "Test outputs:"
+if [ "$TEST_MODE" = "all" ] || [ "$TEST_MODE" = "single" ]; then
+    echo "  - test_output_single/       Single file test results"
+fi
+if [ "$TEST_MODE" = "all" ] || [ "$TEST_MODE" = "directory" ]; then
+    echo "  - test_output_directory/    Directory test results"
+fi
+echo ""
+echo "Key validations performed:"
+echo "  ✓ Single .txt file input"
+echo "  ✓ Directory with multiple .txt files"
+echo "  ✓ File merging and deduplication"
+echo "  ✓ Filtering parameters passed to reports"
+echo "  ✓ Comment and blank line filtering"
+echo ""
+echo "Usage examples:"
+echo "  bash tests/run_test.sh                  # Run all tests"
+echo "  bash tests/run_test.sh --single         # Run single file test only"
+echo "  bash tests/run_test.sh --directory      # Run directory test only"
+echo "  bash tests/run_test.sh --with-thermo    # Run with thermodynamic analysis"
+echo "  bash tests/run_test.sh --all --with-thermo  # All tests with thermo"
+echo ""

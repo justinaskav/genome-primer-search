@@ -1,0 +1,8 @@
+# === HUMAN GENOME ===
+Homo sapiens
+
+# Homo sapiens haplogroup H8 mitochondrion, complete genome (Accession no. MN986463.1) 100% identity
+MN986463.1
+
+# Homo sapiens haplogroup V13 mitochondrion, complete genome
+MF097962.1

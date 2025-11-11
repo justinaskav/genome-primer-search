@@ -20,12 +20,27 @@ workflow {
     }
 
     // Create channel from genome list
-    // Supports both taxon names and assembly accessions (GCA_/GCF_)
-    genomes_ch = Channel
-        .fromPath(params.genomes)
-        .splitText()
-        .map { it.trim() }
-        .filter { it != '' && !it.startsWith('#') }  // Filter empty lines and comments
+    // Supports both:
+    // - Single .txt file with genome names/accessions
+    // - Directory containing multiple .txt files (all will be merged)
+    // - Taxon names and assembly accessions (GCA_/GCF_)
+    if (file(params.genomes).isDirectory()) {
+        // Directory input: read all .txt files and merge
+        genomes_ch = Channel
+            .fromPath("${params.genomes}/*.txt")
+            .splitText()
+            .map { it.trim() }
+            .filter { it != '' && !it.startsWith('#') }  // Filter empty lines and comments
+            .unique()  // Remove duplicate genome entries
+    } else {
+        // Single file input
+        genomes_ch = Channel
+            .fromPath(params.genomes)
+            .splitText()
+            .map { it.trim() }
+            .filter { it != '' && !it.startsWith('#') }  // Filter empty lines and comments
+            .unique()  // Remove duplicate genome entries
+    }
 
     // Load primers file
     primers_ch = Channel.fromPath(params.primers)

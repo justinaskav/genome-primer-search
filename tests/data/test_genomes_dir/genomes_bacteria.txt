@@ -1,0 +1,8 @@
+# Test genome list: Bacterial genomes
+# Small genomes for quick validation
+
+# Mycoplasma genitalium (small genome ~580kb)
+GCA_000005845.2
+
+# Escherichia coli K-12 (medium genome ~4.6Mb)
+Escherichia coli

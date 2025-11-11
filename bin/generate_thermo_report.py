@@ -22,7 +22,7 @@ def generate_detailed_tsv(results: List[Dict], output_file: Path):
     """Generate detailed per-amplicon TSV report"""
 
     headers = [
-        'Primer', 'Genome', 'Amplicon_Length',
+        'Primer', 'Genome', 'Forward_Position', 'Reverse_Position', 'Amplicon_Length',
         'Is_Target', 'Risk_Classification', 'P_Amplification',
         'Forward_Tm_Target', 'Forward_Tm_Actual', 'Forward_Delta_Tm', 'Forward_Mismatches',
         'Reverse_Tm_Target', 'Reverse_Tm_Actual', 'Reverse_Delta_Tm', 'Reverse_Mismatches',
@@ -37,6 +37,8 @@ def generate_detailed_tsv(results: List[Dict], output_file: Path):
             row = [
                 r['primer_name'],
                 r['genome'],
+                r.get('forward_position', 'N/A'),
+                r.get('reverse_position', 'N/A'),
                 r['amplicon_length'],
                 'Yes' if r['is_intended_target'] else 'No',
                 r['risk_classification'],
@@ -62,8 +64,8 @@ def generate_offtarget_summary(results: List[Dict], output_file: Path):
     """Generate summary of high-risk off-target amplifications"""
 
     headers = [
-        'Primer', 'Genome', 'Amplicon_Length',
-        'Risk_Classification', 'P_Amplification',
+        'Primer', 'Genome', 'Forward_Position', 'Reverse_Position',
+        'Amplicon_Length', 'Risk_Classification', 'P_Amplification',
         'Delta_Tm_Average', 'Total_Mismatches',
         'Forward_3prime_MM', 'Reverse_3prime_MM',
         'Recommendation'
@@ -97,6 +99,8 @@ def generate_offtarget_summary(results: List[Dict], output_file: Path):
             row = [
                 r['primer_name'],
                 r['genome'],
+                r.get('forward_position', 'N/A'),
+                r.get('reverse_position', 'N/A'),
                 r['amplicon_length'],
                 r['risk_classification'].upper(),
                 r['p_amplification_overall'],
@@ -212,6 +216,42 @@ def generate_primer_specificity(results: List[Dict], output_file: Path):
             f.write('\t'.join(map(str, row)) + '\n')
 
 
+def format_position_range(fwd_pos, rev_pos, amp_len=None):
+    """
+    Format primer position range with calculated amplicon coordinates.
+
+    Args:
+        fwd_pos: Forward primer position (start)
+        rev_pos: Reverse primer position
+        amp_len: Amplicon length (optional, for calculating actual range)
+
+    Returns:
+        Formatted position string showing amplicon start..end
+    """
+    if not fwd_pos:
+        return "N/A"
+
+    if amp_len:
+        # Calculate actual amplicon end from forward position + length
+        amp_start = fwd_pos
+        amp_end = fwd_pos + amp_len - 1
+
+        if fwd_pos > rev_pos:
+            # Circular genome: amplicon wraps around origin
+            return f"{amp_start:,}..{amp_end:,} (⟳)"
+        else:
+            # Linear region
+            return f"{amp_start:,}..{amp_end:,}"
+    else:
+        # Fallback: use primer positions
+        if not rev_pos:
+            return f"{fwd_pos:,}.."
+        elif fwd_pos > rev_pos:
+            return f"{fwd_pos:,}→{rev_pos:,} (⟳)"
+        else:
+            return f"{fwd_pos:,}..{rev_pos:,}"
+
+
 def format_alignment_html(result: Dict, row_id: str) -> str:
     """
     Format alignment data as HTML for expandable row
@@ -227,6 +267,32 @@ def format_alignment_html(result: Dict, row_id: str) -> str:
         return ""
 
     html = f'<div class="alignment-container">'
+
+    # Show genomic coordinates
+    fwd_pos = result.get('forward_position')
+    rev_pos = result.get('reverse_position')
+    genome = result.get('genome', 'Unknown')
+    amp_len = result.get('amplicon_length', 0)
+
+    if fwd_pos and rev_pos and amp_len:
+        html += f'<div style="margin-bottom: 10px; font-size: 12px; color: #1976d2; background: #e3f2fd; padding: 5px; border-left: 3px solid #2196F3;">'
+
+        # Calculate amplicon range from forward position + length
+        amp_start = fwd_pos
+        amp_end = fwd_pos + amp_len - 1
+
+        # Detect circular genome (forward > reverse)
+        if fwd_pos > rev_pos:
+            # Circular: amplicon wraps around origin
+            html += f'<strong>Amplicon Region:</strong> {genome}:{amp_start:,}..{amp_end:,} '
+            html += f'<span style="color: #d32f2f; font-weight: bold;">(circular, {amp_len}bp)</span><br>'
+            html += f'<span style="font-size: 11px;">Wraps around genome origin | Fwd primer@{fwd_pos:,}, Rev primer@{rev_pos:,}</span>'
+        else:
+            # Linear: normal amplicon
+            html += f'<strong>Amplicon Region:</strong> {genome}:{amp_start:,}..{amp_end:,} ({amp_len}bp)<br>'
+            html += f'<span style="font-size: 11px;">Fwd primer@{fwd_pos:,}, Rev primer@{rev_pos:,}</span>'
+
+        html += '</div>'
 
     # Show original primers with IUPAC codes
     fwd_primer_orig = result.get('forward_primer_seq', '')
@@ -312,7 +378,8 @@ def format_alignment_html(result: Dict, row_id: str) -> str:
 
 
 def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
-                        offtarget_file: Path, specificity_file: Path):
+                        offtarget_file: Path, specificity_file: Path,
+                        min_size: int = 50, max_size: int = 10000):
     """Generate interactive HTML report"""
 
     # Summary statistics
@@ -560,7 +627,8 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             dNTPs = {metadata['pcr_conditions'].get('dNTPs', 'N/A')} mM<br>
             <strong>ΔTm Thresholds:</strong>
             High risk < {metadata['delta_tm_thresholds']['high_risk']}°C,
-            Medium risk < {metadata['delta_tm_thresholds']['medium_risk']}°C
+            Medium risk < {metadata['delta_tm_thresholds']['medium_risk']}°C<br>
+            <strong>Amplicon Size Filter:</strong> {min_size:,} - {max_size:,} bp
         </div>
 
         <div class="section" style="background: #e3f2fd; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0;">
@@ -693,6 +761,7 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                     <tr>
                         <th>Primer</th>
                         <th>Genome</th>
+                        <th>Position</th>
                         <th>Amplicon Length</th>
                         <th>Mismatches</th>
                         <th>ΔTm (°C)</th>
@@ -704,10 +773,17 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             # Use primersearch mismatch count for intended targets
             # (primersearch is IUPAC-aware, so this reflects what the user specified)
             mm_count = r.get('total_mismatches_primersearch', r['total_mismatches'])
+            pos_str = format_position_range(
+                r.get('forward_position'),
+                r.get('reverse_position'),
+                r.get('amplicon_length')
+            )
+
             html += f"""
                     <tr>
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
+                        <td>{pos_str}</td>
                         <td>{r['amplicon_length']}</td>
                         <td>{mm_count}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
@@ -780,6 +856,7 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                     <tr>
                         <th>Primer</th>
                         <th>Genome</th>
+                        <th>Position</th>
                         <th>Length (bp)</th>
                         <th>P(Amplification)</th>
                         <th>ΔTm (°C)</th>
@@ -801,10 +878,17 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             else:
                 alignment_btn = 'N/A'
 
+            pos_str = format_position_range(
+                r.get('forward_position'),
+                r.get('reverse_position'),
+                r.get('amplicon_length')
+            )
+
             html += f"""
                     <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
+                        <td>{pos_str}</td>
                         <td>{r['amplicon_length']}</td>
                         <td>{r['p_amplification_overall']:.3f}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
@@ -836,6 +920,7 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                     <tr>
                         <th>Primer</th>
                         <th>Genome</th>
+                        <th>Position</th>
                         <th>Length (bp)</th>
                         <th>P(Amplification)</th>
                         <th>ΔTm (°C)</th>
@@ -856,10 +941,17 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             else:
                 alignment_btn = 'N/A'
 
+            pos_str = format_position_range(
+                r.get('forward_position'),
+                r.get('reverse_position'),
+                r.get('amplicon_length')
+            )
+
             html += f"""
                     <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
+                        <td>{pos_str}</td>
                         <td>{r['amplicon_length']}</td>
                         <td>{r['p_amplification_overall']:.3f}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
@@ -891,6 +983,7 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                     <tr>
                         <th>Primer</th>
                         <th>Genome</th>
+                        <th>Position</th>
                         <th>Length (bp)</th>
                         <th>P(Amplification)</th>
                         <th>ΔTm (°C)</th>
@@ -911,10 +1004,17 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             else:
                 alignment_btn = 'N/A'
 
+            pos_str = format_position_range(
+                r.get('forward_position'),
+                r.get('reverse_position'),
+                r.get('amplicon_length')
+            )
+
             html += f"""
                     <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
+                        <td>{pos_str}</td>
                         <td>{r['amplicon_length']}</td>
                         <td>{r['p_amplification_overall']:.3f}</td>
                         <td>{r['delta_tm_average']:.1f}</td>
@@ -999,7 +1099,7 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                     const newRow = document.createElement('tr');
                     newRow.className = 'alignment-row show';
                     newRow.id = rowId;
-                    newRow.innerHTML = '<td colspan="7">' + alignmentData + '</td>';
+                    newRow.innerHTML = '<td colspan="8">' + alignmentData + '</td>';
 
                     // Insert after current row
                     parentRow.parentNode.insertBefore(newRow, parentRow.nextSibling);
@@ -1025,6 +1125,10 @@ def main():
                        help='Input JSON file(s) from thermodynamic_analysis.py')
     parser.add_argument('-o', '--outdir', type=Path, required=True,
                        help='Output directory for reports')
+    parser.add_argument('--min-size', type=int, default=50,
+                       help='Minimum amplicon size filter (bp)')
+    parser.add_argument('--max-size', type=int, default=10000,
+                       help='Maximum amplicon size filter (bp)')
 
     args = parser.parse_args()
 
@@ -1063,7 +1167,8 @@ def main():
     generate_primer_specificity(all_results, specificity_file)
 
     print(f"Generating HTML report: {html_file}", file=sys.stderr)
-    generate_html_report(all_results, metadata, html_file, offtarget_file, specificity_file)
+    generate_html_report(all_results, metadata, html_file, offtarget_file, specificity_file,
+                        args.min_size, args.max_size)
 
     print("\nReport generation complete!", file=sys.stderr)
     print(f"  Detailed analysis: {detailed_file}", file=sys.stderr)

@@ -1,0 +1,11 @@
+# Test genome list: Additional genomes
+# Includes overlap with bacteria list to test deduplication
+
+# Duplicate entry (should be deduplicated)
+Escherichia coli
+
+# Haemophilus influenzae (small genome ~1.8Mb)
+GCA_000027305.1
+
+# Another duplicate for testing
+GCA_000005845.2

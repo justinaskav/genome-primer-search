@@ -16,7 +16,7 @@ from datetime import datetime
 
 def parse_filtered_results(filtered_dir):
     """
-    Parse all filtered result files and extract amplicon details.
+    Parse all filtered result files and extract amplicon details including positions.
     """
     results = []
     filtered_files = glob.glob(f"{filtered_dir}/*_filtered.out")
@@ -28,6 +28,8 @@ def parse_filtered_results(filtered_dir):
             current_primer = None
             current_amplicon = []
             current_length = None
+            current_fwd_pos = None
+            current_rev_pos = None
 
             for line in f:
                 line = line.rstrip('\n')
@@ -39,12 +41,16 @@ def parse_filtered_results(filtered_dir):
                             'genome': genome_name,
                             'primer': current_primer,
                             'amplicon': '\n'.join(current_amplicon),
-                            'length': current_length
+                            'length': current_length,
+                            'forward_pos': current_fwd_pos,
+                            'reverse_pos': current_rev_pos
                         })
                     # Start new primer
                     current_primer = line.replace('Primer name ', '').strip()
                     current_amplicon = []
                     current_length = None
+                    current_fwd_pos = None
+                    current_rev_pos = None
 
                 elif line.startswith('Amplimer '):
                     # Save previous amplicon if exists
@@ -53,11 +59,15 @@ def parse_filtered_results(filtered_dir):
                             'genome': genome_name,
                             'primer': current_primer,
                             'amplicon': '\n'.join(current_amplicon),
-                            'length': current_length
+                            'length': current_length,
+                            'forward_pos': current_fwd_pos,
+                            'reverse_pos': current_rev_pos
                         })
                     # Start new amplicon
                     current_amplicon = [line]
                     current_length = None
+                    current_fwd_pos = None
+                    current_rev_pos = None
 
                 elif current_amplicon:
                     current_amplicon.append(line)
@@ -68,13 +78,27 @@ def parse_filtered_results(filtered_dir):
                         if match:
                             current_length = int(match.group(1))
 
+                    # Extract forward position
+                    if 'hits forward strand at' in line:
+                        match = re.search(r'at\s+(\d+)\s+with', line)
+                        if match:
+                            current_fwd_pos = int(match.group(1))
+
+                    # Extract reverse position (in brackets)
+                    if 'hits reverse strand at' in line:
+                        match = re.search(r'at\s+\[?(\d+)\]?\s+with', line)
+                        if match:
+                            current_rev_pos = int(match.group(1))
+
             # Add last amplicon
             if current_amplicon and current_primer:
                 results.append({
                     'genome': genome_name,
                     'primer': current_primer,
                     'amplicon': '\n'.join(current_amplicon),
-                    'length': current_length
+                    'length': current_length,
+                    'forward_pos': current_fwd_pos,
+                    'reverse_pos': current_rev_pos
                 })
 
     return results
@@ -103,6 +127,21 @@ def get_unique_primers(results):
     return sorted(set(r['primer'] for r in results))
 
 
+def format_position(fwd_pos, rev_pos):
+    """
+    Format primer positions for display.
+    Returns formatted string like "1,234..5,678" or "N/A" if positions missing.
+    """
+    if fwd_pos is not None and rev_pos is not None:
+        return f"{fwd_pos:,}..{rev_pos:,}"
+    elif fwd_pos is not None:
+        return f"{fwd_pos:,}.."
+    elif rev_pos is not None:
+        return f"..{rev_pos:,}"
+    else:
+        return "N/A"
+
+
 def parse_raw_primersearch(filtered_dir):
     """
     Parse raw primersearch files to get original amplicon counts per primer.
@@ -128,7 +167,7 @@ def parse_raw_primersearch(filtered_dir):
     return raw_data
 
 
-def generate_summary_tsv(results, stats, output_file):
+def generate_summary_tsv(results, stats, output_file, min_size, max_size):
     """
     Generate summary TSV in long/normalized format for scalability.
     Format: One row per genome-primer combination.
@@ -192,7 +231,7 @@ def generate_summary_tsv(results, stats, output_file):
                 str(filtered_small),
                 '-',
                 '-',
-                '50-10000bp'
+                f'{min_size}-{max_size}bp'
             ]
             f.write('\t'.join(row) + '\n')
 
@@ -223,7 +262,7 @@ def generate_summary_tsv(results, stats, output_file):
                         str(filt_small),
                         str(mean_size),
                         size_range,
-                        '50-10000bp'
+                        f'{min_size}-{max_size}bp'
                     ]
                     f.write('\t'.join(row) + '\n')
 
@@ -350,7 +389,7 @@ def generate_primer_stats_tsv(results, stats, output_file):
             f.write(f"{primer}\t{data['kept']}\t{filtered_total}\t{filtered_large}\t{filtered_small}\t{len(data['genomes'])}\t{mean_size}\t{size_range}\n")
 
 
-def generate_html_report(results, stats, output_file):
+def generate_html_report(results, stats, output_file, min_size, max_size):
     """
     Generate HTML summary report with embedded CSS and detailed filtering information.
     """
@@ -519,10 +558,10 @@ def generate_html_report(results, stats, output_file):
 
         <h2>Filtering Summary</h2>
         <div class="filter-details">
-            <strong>Filter Criteria Applied:</strong> 50 - 10,000 bp (removes circular genome artifacts)<br>
+            <strong>Filter Criteria Applied:</strong> {min_size:,} - {max_size:,} bp (removes circular genome artifacts)<br>
             <strong>Total Filtered:</strong> {total_filtered} amplicons<br>
-            <strong>Filtered (too small &lt;50bp):</strong> {filtered_small}<br>
-            <strong>Filtered (too large &gt;10kb / circular):</strong> {filtered_large}
+            <strong>Filtered (too small &lt;{min_size}bp):</strong> {filtered_small}<br>
+            <strong>Filtered (too large &gt;{max_size}bp / circular):</strong> {filtered_large}
         </div>
 
         <h2>Filtering Details by Genome</h2>
@@ -589,6 +628,32 @@ def generate_html_report(results, stats, output_file):
             </tr>
 """
 
+    html += """        </table>
+
+        <h2>Detailed Amplicon Results</h2>
+        <p>Individual amplicons with genomic positions and lengths.</p>
+        <table>
+            <tr>
+                <th>Genome</th>
+                <th>Primer</th>
+                <th>Position</th>
+                <th>Length (bp)</th>
+            </tr>
+"""
+
+    # Sort results by genome, then primer for easy browsing
+    for result in sorted(results, key=lambda x: (x['genome'], x['primer'])):
+        pos_str = format_position(result.get('forward_pos'), result.get('reverse_pos'))
+        length = result.get('length', 'N/A')
+
+        html += f"""            <tr>
+                <td>{result['genome']}</td>
+                <td>{result['primer']}</td>
+                <td>{pos_str}</td>
+                <td>{length}</td>
+            </tr>
+"""
+
     html += f"""        </table>
 
         <div class="timestamp">
@@ -610,6 +675,8 @@ def main():
     parser.add_argument('--filtered-dir', required=True, help='Directory with filtered result files')
     parser.add_argument('--stats-dir', required=True, help='Directory with stats JSON files')
     parser.add_argument('--output-dir', required=True, help='Output directory for reports')
+    parser.add_argument('--min-size', type=int, default=50, help='Minimum amplicon size (bp)')
+    parser.add_argument('--max-size', type=int, default=10000, help='Maximum amplicon size (bp)')
 
     args = parser.parse_args()
 
@@ -622,7 +689,7 @@ def main():
 
     # Generate reports
     print("Generating summary.tsv...")
-    generate_summary_tsv(results, stats, f"{args.output_dir}/summary.tsv")
+    generate_summary_tsv(results, stats, f"{args.output_dir}/summary.tsv", args.min_size, args.max_size)
 
     print("Generating amplicon_stats.tsv...")
     generate_amplicon_stats_tsv(results, f"{args.output_dir}/amplicon_stats.tsv")
@@ -631,7 +698,7 @@ def main():
     generate_primer_stats_tsv(results, stats, f"{args.output_dir}/primer_stats.tsv")
 
     print("Generating summary.html...")
-    generate_html_report(results, stats, f"{args.output_dir}/summary.html")
+    generate_html_report(results, stats, f"{args.output_dir}/summary.html", args.min_size, args.max_size)
 
     print(f"\nReports generated successfully!")
     print(f"  - Total genomes: {len(set(r['genome'] for r in results)) if results else len(stats)}")

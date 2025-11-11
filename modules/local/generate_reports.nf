@@ -19,6 +19,8 @@ process GENERATE_REPORTS {
     generate_html_report.py \
         --filtered-dir . \
         --stats-dir . \
-        --output-dir .
+        --output-dir . \
+        --min-size ${params.min_amplicon_size} \
+        --max-size ${params.max_amplicon_size}
     """
 }

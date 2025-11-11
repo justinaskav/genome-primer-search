@@ -66,7 +66,6 @@ Coprococcus catus
 Eggerthella lenta
 Rothia mucilaginosa
 Veillonella parvula
-Ruminiclostridium leptum
 Clostridium bolteae
 Actinomyces odontolyticus
 Erysipelatoclostridium ramosum
@@ -75,47 +74,3 @@ Clostridium hathewayi
 Ruminococcus gnavus
 Alistipes onderdonkii
 Phascolarctobacterium faecium
-Homo sapiens
-
-# Homo sapiens haplogroup H8 mitochondrion, complete genome (Accession no. MN986463.1) 100% identity
-MN986463.1
-
-# Homo sapiens haplogroup V13 mitochondrion, complete genome
-MF097962.1
-
-## CRC-associated
-Fusobacterium nucleatum
-Bacteroides fragilis
-Escherichia coli
-Enterococcus faecalis
-Peptostreptococcus anaerobius
-Parvimonas micra
-Porphyromonas asaccharolytica
-[Clostridium] symbiosum
-Streptococcus gallolyticus
-Prevotella intermedia
-Prevotella intermeia
-Alistipes finegoldii
-Akkermansia muciniphila
-
-# Additional CRC-associated bacteria
-Peptostreptococcus stomatis
-Gemella morbillorum
-Solobacterium moorei
-Campylobacter jejuni
-Clostridioides difficile
-
-Anaerococcus vaginalis
-
-# Positive control TetA gene
-L20800.1
-Pseudomonas aureofaciens
-Pseudomonda putida
-Stenotrophomonas maltophilia
-Acinetobacter calcoaceticus
-Pseudomonas aeruginosa
-Rhodococcus erythropolis
-
-Bacillus subtilis
-Bacillus cereus
-Burkholderia cepacia

@@ -966,7 +966,7 @@ def main():
     parser.add_argument('--master-mix', default='DreamTaq',
                        help='Master mix name from master_mixes.json (default: DreamTaq)')
     parser.add_argument('--master-mix-file', type=Path,
-                       default=Path(__file__).parent.parent / 'pcr_conditions/master_mixes.json',
+                       default=Path(__file__).parent.parent / 'data/pcr_conditions/master_mixes.json',
                        help='Path to master_mixes.json')
     parser.add_argument('--annealing-temp', type=float, default=60.0,
                        help='Annealing temperature in °C (default: 60)')
