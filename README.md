@@ -79,8 +79,8 @@ Supports IUPAC ambiguity codes (R, Y, W, M, K, etc.).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--genomes` | `genomes/genomes.txt` | Path to genome/sequence list |
-| `--primers` | `primers/primers.txt` | Path to primers file |
+| `--genomes` | `data/genomes/` | Path to a genome/sequence list `.txt` file or a directory of `.txt` files |
+| `--primers` | _required_ | Path to primers file (e.g. `data/primers/16S_primers.txt`) |
 | `--outdir` | `_output` | Output directory |
 | `--mismatch` | `0` | Allowed mismatch percentage (0-100) |
 | `--max_primer_size` | `100` | Maximum primer length (bases) |
@@ -115,7 +115,8 @@ _output/
 │   ├── summary.tsv       # Long-format summary (scales to any # of primers)
 │   ├── summary.html      # Interactive HTML report
 │   ├── amplicon_stats.tsv
-│   └── primer_stats.tsv
+│   ├── primer_stats.tsv
+│   └── failed_genomes.tsv  # Genomes that failed to download — written only if any failed
 └── thermo_reports/       # Optional: Thermodynamic analysis (if enabled)
     ├── thermo_analysis.tsv       # Per-amplicon thermodynamic metrics
     ├── offtarget_summary.tsv     # High-risk off-target amplifications
@@ -163,8 +164,8 @@ bash tests/run_test.sh
 ### Screen 16S primers against gut bacteria
 ```bash
 nextflow run main.nf \
-    --genomes genomes/genomes_CRC.txt \
-    --primers primers/primers_16S.txt \
+    --genomes data/genomes/human_gut_microbiome_CRC_associated.txt \
+    --primers data/primers/16S_primers.txt \
     --mismatch 5
 ```
 
@@ -258,10 +259,10 @@ Uses BioPython's nearest-neighbor thermodynamics with salt corrections (Owczarzy
 ```bash
 # Enable thermodynamic analysis with DreamTaq buffer
 nextflow run main.nf \
-    --genomes genomes/genomes_with_human.txt \
-    --primers primers/primers_16S.txt \
+    --genomes data/genomes/human_gut_microbiome_common.txt \
+    --primers data/primers/16S_primers.txt \
     --enable_thermo_analysis \
-    --thermo_references references/target_sequences.fasta \
+    --thermo_references data/references/16S_ref.fasta \
     --thermo_master_mix DreamTaq \
     --thermo_annealing_temp 60
 

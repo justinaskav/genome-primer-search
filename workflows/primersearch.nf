@@ -20,6 +20,20 @@ workflow PRIMERSEARCH {
     // Step 1: Download genomes from NCBI
     DOWNLOAD_GENOME(genomes_ch)
 
+    // Track download failures: DOWNLOAD_GENOME uses retry-then-ignore, so failed
+    // genomes silently drop from the output channel. Left-join requested vs.
+    // retrieved and emit the unmatched ones so users see what was skipped.
+    failed_genomes_ch = genomes_ch
+        .map { g -> tuple(g) }
+        .join(DOWNLOAD_GENOME.out.genome_file, remainder: true)
+        .filter { it[1] == null }
+        .map { it[0] }
+        .collectFile(
+            name: 'failed_genomes.tsv',
+            newLine: true,
+            seed: 'genome\tstage'
+        ) { "${it}\tdownload" }
+
     // Step 2: Extract FASTA from downloaded archives (or copy if already FASTA)
     EXTRACT_GENOME(DOWNLOAD_GENOME.out.genome_file)
 
@@ -43,6 +57,7 @@ workflow PRIMERSEARCH {
     primersearch_raw = RUN_PRIMERSEARCH.out.results
     filtered_results = FILTER_AMPLICONS.out.filtered
     filter_stats = FILTER_AMPLICONS.out.stats
+    failed_genomes = failed_genomes_ch
     summary_tsv = GENERATE_REPORTS.out.summary_tsv
     summary_html = GENERATE_REPORTS.out.summary_html
     amplicon_stats = GENERATE_REPORTS.out.amplicon_stats

@@ -15,8 +15,17 @@ include { THERMO_ANALYSIS } from './workflows/thermo_analysis'
 workflow {
     main:
     // Validate required parameters
-    if (!params.genomes || !params.primers) {
-        error "Required parameters missing. Please specify --genomes and --primers"
+    if (!params.primers) {
+        error "Required parameter --primers is missing. Point it at a primer file, e.g. --primers data/primers/16S_primers.txt"
+    }
+    if (!file(params.primers).exists()) {
+        error "Primer file not found: ${params.primers}"
+    }
+    if (!params.genomes) {
+        error "Required parameter --genomes is missing. Pass a .txt file or directory of .txt files."
+    }
+    if (!file(params.genomes).exists()) {
+        error "Genome input not found: ${params.genomes}"
     }
 
     // Create channel from genome list
@@ -81,6 +90,7 @@ workflow {
     primersearch_raw = PRIMERSEARCH.out.primersearch_raw
     filtered_results = PRIMERSEARCH.out.filtered_results
     filter_stats = PRIMERSEARCH.out.filter_stats
+    failed_genomes = PRIMERSEARCH.out.failed_genomes
     summary_tsv = PRIMERSEARCH.out.summary_tsv
     summary_html = PRIMERSEARCH.out.summary_html
     amplicon_stats = PRIMERSEARCH.out.amplicon_stats
@@ -104,6 +114,9 @@ output {
     }
     filter_stats {
         path 'results/filter_stats'
+    }
+    failed_genomes {
+        path 'reports'
     }
     summary_tsv {
         path 'reports'

@@ -20,3 +20,17 @@ Gemella morbillorum
 Solobacterium moorei
 Campylobacter jejuni
 Clostridioides difficile
+
+# Other Fusobacterium
+Fusobacterium necrophorum
+Fusobacterium varium
+Fusobacterium mortiferum
+Fusobacterium ulcerans
+Fusobacterium gonidiaformans
+Fusobacterium periodonticum
+Fusobacterium russii
+Fusobacterium canifelinum
+Fusobacterium equinum
+Fusobacterium naviforme
+Fusobacterium simiae
+Fusobacterium pseudonecrophorum
