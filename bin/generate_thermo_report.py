@@ -18,6 +18,73 @@ from datetime import datetime
 from typing import List, Dict
 
 
+def is_target(r: Dict) -> bool:
+    """Hit was matched against a declared reference and accepted as intended."""
+    return r.get('is_intended_target') is True
+
+
+def is_off_target(r: Dict) -> bool:
+    """Hit was matched against a declared reference and rejected."""
+    return r.get('is_intended_target') is False
+
+
+def is_unclassified(r: Dict) -> bool:
+    """No reference was declared for this primer — we make no claim."""
+    return r.get('is_intended_target') is None
+
+
+def target_label(r: Dict) -> str:
+    if is_target(r):
+        return 'Yes'
+    if is_off_target(r):
+        return 'No'
+    return 'Undeclared'
+
+
+def _intent_banner_html(references_provided: bool,
+                        references_per_primer: Dict[str, bool]) -> str:
+    """
+    Banner at the top of the HTML report stating whether the user declared
+    intent (reference FASTA) and which primers it covers. Without this,
+    readers can't tell whether the absence of an "Off-Targets" section means
+    "no off-targets found" or "intent was never declared."
+    """
+    if not references_provided:
+        return (
+            '<div style="background:#fff8e1;border-left:4px solid #f9a825;'
+            'padding:15px;margin:20px 0;">'
+            '<strong>Intent declaration: none.</strong> '
+            'No reference FASTA was provided, so this report cannot classify '
+            'hits as intended targets vs. off-targets. Tm, ΔTm, P(amplification) '
+            'and mismatch profiles below are computed from primer + binding-site '
+            'sequence alone and are still valid — interpret them comparatively. '
+            'To enable target/off-target classification, pass '
+            '<code>--thermo_references &lt;file.fasta&gt;</code> with one entry '
+            'per primer (header <code>&gt;primer_name_reference</code>).'
+            '</div>'
+        )
+    covered = sum(1 for v in references_per_primer.values() if v)
+    total = len(references_per_primer)
+    missing = [p for p, v in references_per_primer.items() if not v]
+    missing_note = ''
+    if missing:
+        missing_note = (
+            ' Hits from primers without a reference will appear as '
+            '<em>Undeclared</em> and are excluded from off-target counts.'
+        )
+        if len(missing) <= 6:
+            missing_note += f' Missing: {", ".join(sorted(missing))}.'
+    return (
+        '<div style="background:#e8f5e9;border-left:4px solid #43a047;'
+        'padding:15px;margin:20px 0;">'
+        f'<strong>Intent declaration:</strong> reference provided for '
+        f'{covered} of {total} primers. Intended targets are hits whose '
+        f'binding region matches the declared reference at &ge; 95 % identity.'
+        f'{missing_note}'
+        '</div>'
+    )
+
+
 def generate_detailed_tsv(results: List[Dict], output_file: Path):
     """Generate detailed per-amplicon TSV report"""
 
@@ -40,7 +107,7 @@ def generate_detailed_tsv(results: List[Dict], output_file: Path):
                 r.get('forward_position', 'N/A'),
                 r.get('reverse_position', 'N/A'),
                 r['amplicon_length'],
-                'Yes' if r['is_intended_target'] else 'No',
+                target_label(r),
                 r['risk_classification'],
                 r['p_amplification_overall'],
                 r['tm_target_forward'],
@@ -71,9 +138,12 @@ def generate_offtarget_summary(results: List[Dict], output_file: Path):
         'Recommendation'
     ]
 
-    # Filter to non-target hits with medium/high risk
+    # Off-target list only contains hits that were *declared* off-target
+    # (reference exists for the primer and the binding region did not match).
+    # Undeclared hits (no reference for this primer) are excluded — calling
+    # them "off-target" with no intent declared would be a lie.
     offtargets = [r for r in results
-                  if not r['is_intended_target']
+                  if is_off_target(r)
                   and r['risk_classification'] in ['high', 'medium']]
 
     # Sort by risk (high first) then by P_amplification (descending)
@@ -114,7 +184,25 @@ def generate_offtarget_summary(results: List[Dict], output_file: Path):
 
 
 def generate_primer_specificity(results: List[Dict], output_file: Path):
-    """Generate per-primer specificity metrics"""
+    """
+    Generate per-primer specificity metrics.
+
+    Specificity is only meaningful when the user declared intent (reference
+    FASTA). Without that, the score collapses to nonsense — 0 targets and 0
+    off-targets yields a vacuous "100% Excellent" rating. We detect the
+    no-intent case by checking whether any result has a non-null
+    is_intended_target and, if not, write a header-only TSV so downstream
+    consumers see the same intent state the HTML conveys.
+    """
+    intent_declared = any(r.get('is_intended_target') is not None for r in results)
+    if not intent_declared:
+        with open(output_file, 'w') as f:
+            f.write(
+                'Primer\tTotal_Hits\tTarget_Hits\tOffTarget_Hits\tHigh_Risk_OffTargets\t'
+                'Medium_Risk_OffTargets\tLow_Risk_OffTargets\tGenomes_Hit\t'
+                'Mean_OffTarget_Delta_Tm\tMean_OffTarget_P_Amp\tSpecificity_Score\tSpecificity_Rating\n'
+            )
+        return
 
     # Aggregate by primer
     primer_stats = defaultdict(lambda: {
@@ -136,9 +224,9 @@ def generate_primer_specificity(results: List[Dict], output_file: Path):
         stats['total_hits'] += 1
         stats['genomes_hit'].add(r['genome'])
 
-        if r['is_intended_target']:
+        if is_target(r):
             stats['target_hits'] += 1
-        else:
+        elif is_off_target(r):
             stats['offtarget_hits'] += 1
             stats['mean_delta_tm'].append(r['delta_tm_average'])
             stats['mean_p_amp_offtarget'].append(r['p_amplification_overall'])
@@ -149,6 +237,8 @@ def generate_primer_specificity(results: List[Dict], output_file: Path):
                 stats['medium_risk_offtargets'] += 1
             else:
                 stats['low_risk_offtargets'] += 1
+        # Undeclared hits (no per-primer reference) are counted in total_hits
+        # only — they don't pollute the target / off-target tallies.
 
     headers = [
         'Primer', 'Total_Hits', 'Target_Hits', 'OffTarget_Hits',
@@ -382,36 +472,34 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         min_size: int = 50, max_size: int = 10000):
     """Generate interactive HTML report"""
 
+    # Did the user declare intent for any primer?
+    references_provided = bool(metadata.get('references_provided'))
+    references_per_primer = metadata.get('references_per_primer', {}) or {}
+
     # Summary statistics
     total_amplicons = len(results)
-    targets = sum(1 for r in results if r['is_intended_target'])
-    offtargets = total_amplicons - targets
+    targets = sum(1 for r in results if is_target(r))
+    offtargets = sum(1 for r in results if is_off_target(r))
+    unclassified = sum(1 for r in results if is_unclassified(r))
 
-    # Risk classifications (only for off-targets, not intended targets)
-    high_risk = sum(1 for r in results
-                   if not r['is_intended_target'] and r['risk_classification'] == 'high')
-    medium_risk = sum(1 for r in results
-                     if not r['is_intended_target'] and r['risk_classification'] == 'medium')
-    low_risk = sum(1 for r in results
-                  if not r['is_intended_target'] and r['risk_classification'] == 'low')
+    # P(amplification) bins — always meaningful, computed from thermodynamics
+    # regardless of intent declaration.
+    high_risk = sum(1 for r in results if r['risk_classification'] == 'high')
+    medium_risk = sum(1 for r in results if r['risk_classification'] == 'medium')
+    low_risk = sum(1 for r in results if r['risk_classification'] == 'low')
 
-    # Read primer specificity data
+    # Specificity / off-target sections only render when intent was declared.
     primer_specificity = []
-    if specificity_file.exists():
+    problem_primers = []
+    if references_provided and specificity_file.exists():
         with open(specificity_file, 'r') as f:
             headers = f.readline().strip().split('\t')
             for line in f:
                 if line.strip():
                     values = line.strip().split('\t')
                     primer_specificity.append(dict(zip(headers, values)))
-
-    # Calculate ΔTm distribution for off-targets
-    offtarget_delta_tms = [r['delta_tm_average'] for r in results
-                           if not r['is_intended_target'] and r['delta_tm_average'] > 0]
-
-    # Identify problem primers (high off-target rate)
-    problem_primers = [p for p in primer_specificity
-                      if int(p.get('High_Risk_OffTargets', 0)) > 0]
+        problem_primers = [p for p in primer_specificity
+                          if int(p.get('High_Risk_OffTargets', 0)) > 0]
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -591,6 +679,8 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
         <h1>Thermodynamic Primer Analysis Report</h1>
         <div class="subtitle">Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
 
+        {_intent_banner_html(references_provided, references_per_primer)}
+
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-value">{total_amplicons}</div>
@@ -598,24 +688,18 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             </div>
             <div class="stat-card high">
                 <div class="stat-value">{high_risk}</div>
-                <div class="stat-label">High Risk</div>
+                <div class="stat-label">High P(amp)</div>
             </div>
             <div class="stat-card medium">
                 <div class="stat-value">{medium_risk}</div>
-                <div class="stat-label">Medium Risk</div>
+                <div class="stat-label">Medium P(amp)</div>
             </div>
             <div class="stat-card low">
                 <div class="stat-value">{low_risk}</div>
-                <div class="stat-label">Low Risk</div>
+                <div class="stat-label">Low P(amp)</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">{targets}</div>
-                <div class="stat-label">Intended Targets</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{offtargets}</div>
-                <div class="stat-label">Off-Targets</div>
-            </div>
+            {"<div class='stat-card'><div class='stat-value'>" + str(targets) + "</div><div class='stat-label'>Intended Targets</div></div>" if references_provided else ""}
+            {"<div class='stat-card'><div class='stat-value'>" + str(offtargets) + "</div><div class='stat-label'>Off-Targets</div></div>" if references_provided else ""}
         </div>
 
         <div class="metadata">
@@ -653,8 +737,8 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
         </div>
 """
 
-    # Add Primer Specificity section
-    if primer_specificity:
+    # Add Primer Specificity section (only when intent was declared)
+    if references_provided and primer_specificity:
         html += """
         <div class="section">
             <h2>Primer Specificity Summary</h2>
@@ -749,8 +833,8 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
         </div>
 """
 
-    # Add Intended Target Validation section
-    target_amplicons = [r for r in results if r['is_intended_target']]
+    # Add Intended Target Validation section (only when intent declared)
+    target_amplicons = [r for r in results if is_target(r)] if references_provided else []
     if target_amplicons:
         html += f"""
         <div class="section">
@@ -795,8 +879,8 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
         </div>
 """
 
-    # Add Problem Primers section
-    if problem_primers:
+    # Add Problem Primers section (only when intent declared)
+    if references_provided and problem_primers:
         html += f"""
         <div class="section">
             <h2>Problem Primers</h2>
@@ -838,19 +922,22 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
         </div>
 """
 
-    html += f"""
+    # Off-target sections are only rendered when intent was declared. Without
+    # a reference for the primer, we can't say a hit is "off-target" — it's
+    # simply unclassified, and forcing it into a risk table would be misleading.
+    if references_provided:
+        html += f"""
         <div class="section">
             <h2>High-Risk Off-Target Amplifications</h2>
             <p>Amplicons with high probability of unintended amplification (ΔTm < {metadata['delta_tm_thresholds']['high_risk']}°C and minimal 3' mismatches).</p>
 """
 
-    # Add high-risk off-targets table
-    high_risk_offtargets = [r for r in results
-                           if not r['is_intended_target']
-                           and r['risk_classification'] == 'high']
+        high_risk_offtargets = [r for r in results
+                               if is_off_target(r)
+                               and r['risk_classification'] == 'high']
 
-    if high_risk_offtargets:
-        html += """
+        if high_risk_offtargets:
+            html += """
             <table id="highRiskTable" class="display">
                 <thead>
                     <tr>
@@ -866,25 +953,24 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                 </thead>
                 <tbody>
 """
-        for idx, r in enumerate(high_risk_offtargets):  # Show all
-            row_id = f"high_risk_{idx}"
-            has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
+            for idx, r in enumerate(high_risk_offtargets):
+                row_id = f"high_risk_{idx}"
+                has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
 
-            if has_alignment:
-                alignment_html = format_alignment_html(r, row_id)
-                # Store alignment data in data attribute for dynamic injection
-                alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
-                alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
-            else:
-                alignment_btn = 'N/A'
+                if has_alignment:
+                    alignment_html = format_alignment_html(r, row_id)
+                    alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
+                    alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
+                else:
+                    alignment_btn = 'N/A'
 
-            pos_str = format_position_range(
-                r.get('forward_position'),
-                r.get('reverse_position'),
-                r.get('amplicon_length')
-            )
+                pos_str = format_position_range(
+                    r.get('forward_position'),
+                    r.get('reverse_position'),
+                    r.get('amplicon_length')
+                )
 
-            html += f"""
+                html += f"""
                     <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
@@ -896,12 +982,12 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         <td>{alignment_btn}</td>
                     </tr>
 """
-        html += "                </tbody>\n            </table>\n"
-    else:
-        html += "            <p>No high-risk off-target amplifications detected.</p>\n"
+            html += "                </tbody>\n            </table>\n"
+        else:
+            html += "            <p>No high-risk off-target amplifications detected.</p>\n"
 
-    # Add medium risk off-targets table
-    html += """
+        # Medium risk off-targets table
+        html += """
         </div>
 
         <div class="section">
@@ -909,12 +995,12 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             <p>Off-target amplifications with moderate probability (0.3-0.7). These may amplify under some conditions.</p>
 """
 
-    medium_risk_offtargets = [r for r in results
-                              if not r['is_intended_target']
-                              and r['risk_classification'] == 'medium']
+        medium_risk_offtargets = [r for r in results
+                                  if is_off_target(r)
+                                  and r['risk_classification'] == 'medium']
 
-    if medium_risk_offtargets:
-        html += """
+        if medium_risk_offtargets:
+            html += """
             <table id="mediumRiskTable" class="display">
                 <thead>
                     <tr>
@@ -930,24 +1016,24 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                 </thead>
                 <tbody>
 """
-        for idx, r in enumerate(medium_risk_offtargets):
-            row_id = f"medium_risk_{idx}"
-            has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
+            for idx, r in enumerate(medium_risk_offtargets):
+                row_id = f"medium_risk_{idx}"
+                has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
 
-            if has_alignment:
-                alignment_html = format_alignment_html(r, row_id)
-                alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
-                alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
-            else:
-                alignment_btn = 'N/A'
+                if has_alignment:
+                    alignment_html = format_alignment_html(r, row_id)
+                    alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
+                    alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
+                else:
+                    alignment_btn = 'N/A'
 
-            pos_str = format_position_range(
-                r.get('forward_position'),
-                r.get('reverse_position'),
-                r.get('amplicon_length')
-            )
+                pos_str = format_position_range(
+                    r.get('forward_position'),
+                    r.get('reverse_position'),
+                    r.get('amplicon_length')
+                )
 
-            html += f"""
+                html += f"""
                     <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
@@ -959,12 +1045,12 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         <td>{alignment_btn}</td>
                     </tr>
 """
-        html += "                </tbody>\n            </table>\n"
-    else:
-        html += "            <p>No medium-risk off-target amplifications detected.</p>\n"
+            html += "                </tbody>\n            </table>\n"
+        else:
+            html += "            <p>No medium-risk off-target amplifications detected.</p>\n"
 
-    # Add low risk off-targets table
-    html += """
+        # Low risk off-targets table
+        html += """
         </div>
 
         <div class="section">
@@ -972,12 +1058,12 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
             <p>Off-target amplifications with low probability (<0.3). These are unlikely to amplify significantly.</p>
 """
 
-    low_risk_offtargets = [r for r in results
-                           if not r['is_intended_target']
-                           and r['risk_classification'] == 'low']
+        low_risk_offtargets = [r for r in results
+                               if is_off_target(r)
+                               and r['risk_classification'] == 'low']
 
-    if low_risk_offtargets:
-        html += """
+        if low_risk_offtargets:
+            html += """
             <table id="lowRiskTable" class="display">
                 <thead>
                     <tr>
@@ -993,24 +1079,24 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                 </thead>
                 <tbody>
 """
-        for idx, r in enumerate(low_risk_offtargets):
-            row_id = f"low_risk_{idx}"
-            has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
+            for idx, r in enumerate(low_risk_offtargets):
+                row_id = f"low_risk_{idx}"
+                has_alignment = 'forward_alignment' in r or 'reverse_alignment' in r
 
-            if has_alignment:
-                alignment_html = format_alignment_html(r, row_id)
-                alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
-                alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
-            else:
-                alignment_btn = 'N/A'
+                if has_alignment:
+                    alignment_html = format_alignment_html(r, row_id)
+                    alignment_data = alignment_html.replace('"', '&quot;').replace("'", '&#39;')
+                    alignment_btn = f'<span class="expand-btn" onclick="toggleAlignment(\'{row_id}\', this)" data-alignment="{alignment_data}">Show</span>'
+                else:
+                    alignment_btn = 'N/A'
 
-            pos_str = format_position_range(
-                r.get('forward_position'),
-                r.get('reverse_position'),
-                r.get('amplicon_length')
-            )
+                pos_str = format_position_range(
+                    r.get('forward_position'),
+                    r.get('reverse_position'),
+                    r.get('amplicon_length')
+                )
 
-            html += f"""
+                html += f"""
                     <tr data-row-id="{row_id}">
                         <td>{r['primer_name']}</td>
                         <td>{r['genome']}</td>
@@ -1022,13 +1108,13 @@ def generate_html_report(results: List[Dict], metadata: Dict, output_file: Path,
                         <td>{alignment_btn}</td>
                     </tr>
 """
-        html += "                </tbody>\n            </table>\n"
-    else:
-        html += "            <p>No low-risk off-target amplifications detected.</p>\n"
+            html += "                </tbody>\n            </table>\n"
+        else:
+            html += "            <p>No low-risk off-target amplifications detected.</p>\n"
+
+        html += "        </div>\n"
 
     html += f"""
-        </div>
-
         <div class="section">
             <h2>Files Generated</h2>
             <ul>

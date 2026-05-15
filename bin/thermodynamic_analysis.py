@@ -101,41 +101,21 @@ class ThermoAnalyzer:
         gc_count = seq.upper().count('G') + seq.upper().count('C')
         return 2 * at_count + 4 * gc_count
 
-    def calculate_binding_probability_from_tm(self, tm_actual: float, tm_target: float,
+    def calculate_binding_probability_from_tm(self, tm_actual: float,
                                               temp_celsius: float) -> float:
         """
-        Calculate binding probability using a simplified empirical model
+        Sigmoid binding probability from actual Tm vs. annealing temperature.
 
-        Based on the relationship between Tm, annealing temperature, and binding.
-        At T_anneal = Tm, approximately 50% of primers are bound.
-
-        Args:
-            tm_actual: Actual Tm with mismatches (°C)
-            tm_target: Perfect match Tm (°C)
-            temp_celsius: Annealing temperature (°C)
-
-        Returns:
-            Binding probability (0-1)
+        At T_anneal = Tm, ~50% bound. The intent-target Tm is not a factor here
+        — what matters thermodynamically is the actual Tm at the binding site
+        relative to the reaction temperature.
         """
-        # Use a sigmoid function based on the difference between Tm and annealing temp
-        # When Tm >> T_anneal: high binding (P → 1)
-        # When Tm ≈ T_anneal: moderate binding (P ≈ 0.5)
-        # When Tm << T_anneal: low binding (P → 0)
-
-        # The "steepness" parameter controls how sharply binding drops off
-        # Typical value: 1 degree Tm change ≈ ~10% change in binding
-        steepness = 0.15  # Empirical parameter
-
-        # Calculate binding probability using sigmoid
-        # P_bind = 1 / (1 + exp(-steepness * (Tm - T_anneal)))
+        steepness = 0.15  # 1 °C ≈ 10 % change in binding
         delta_t = tm_actual - temp_celsius
-
         try:
-            p_bind = 1.0 / (1.0 + math.exp(-steepness * delta_t))
+            return 1.0 / (1.0 + math.exp(-steepness * delta_t))
         except OverflowError:
-            p_bind = 1.0 if delta_t > 0 else 0.0
-
-        return p_bind
+            return 1.0 if delta_t > 0 else 0.0
 
     def analyze_mismatch_profile(self, primer_seq: str, mismatches: int,
                                   primer_strand: str) -> Dict:
@@ -169,58 +149,29 @@ class ThermoAnalyzer:
             'mismatch_density': round(mismatches / primer_length, 3) if primer_length > 0 else 0
         }
 
-    def calculate_amplification_probability(self, primer_seq: str,
-                                           tm_actual: float,
-                                           tm_target: float,
-                                           delta_tm: float,
-                                           mismatch_profile: Dict,
-                                           primer_strand: str,
-                                           is_intended_target: bool = False) -> Tuple[float, str]:
+    def calculate_amplification_probability(self, tm_actual: float,
+                                           mismatch_profile: Dict) -> Tuple[float, str]:
         """
-        Estimate probability of amplification using Tm-based empirical model
+        Estimate probability of amplification from binding × extension.
 
-        Uses sigmoid function relating Tm and annealing temperature for binding,
-        combined with extension efficiency based on 3' mismatches.
-
-        Args:
-            primer_seq: Primer sequence
-            tm_actual: Actual Tm with mismatches (°C)
-            tm_target: Perfect match target Tm (°C)
-            delta_tm: ΔTm = Tm_target - Tm_actual
-            mismatch_profile: Mismatch analysis dict
-            primer_strand: 'forward' or 'reverse'
-            is_intended_target: Whether this is the intended target (not an off-target)
+        P(amp) is now computed identically for every hit regardless of intent —
+        target vs. off-target classification happens separately, downstream,
+        and only when the user supplied references. This keeps the
+        thermodynamic number meaningful even in no-reference mode.
 
         Returns:
-            Tuple of (probability 0-1, classification 'target'/'high'/'medium'/'low')
+            Tuple of (probability 0–1, risk bin 'high'/'medium'/'low')
         """
-        # Intended targets should not be classified as "risk"
-        # Perfect match to intended target = expected behavior
-        if is_intended_target:
-            return (1.0, 'target')
-
-        # Get mismatch information
         estimated_3prime = mismatch_profile['estimated_3prime_mismatches']
-        total_mm = mismatch_profile['total_mismatches']
 
-        # Calculate binding probability based on Tm and annealing temperature
-        # Uses sigmoid relationship
-        p_bind = self.calculate_binding_probability_from_tm(
-            tm_actual,
-            tm_target,
-            self.annealing_temp
-        )
+        p_bind = self.calculate_binding_probability_from_tm(tm_actual, self.annealing_temp)
 
-        # Calculate extension efficiency
-        # 3' mismatches severely reduce polymerase extension
-        # Use exponential penalty: P_extend = exp(-k * 3prime_mismatches)
-        k_extension = 1.2  # Empirical constant for 3' mismatch penalty
+        # 3' mismatches block polymerase extension exponentially
+        k_extension = 1.2
         p_extend = math.exp(-k_extension * estimated_3prime)
 
-        # Overall probability: must both bind AND extend
         p_amplification = p_bind * p_extend
 
-        # Classify based on probability thresholds
         if p_amplification >= 0.7:
             classification = 'high'
         elif p_amplification >= 0.3:
@@ -253,32 +204,35 @@ class ThermoAnalyzer:
         Returns:
             Dict with complete thermodynamic analysis
         """
-        # Get reference sequence for this primer
-        reference_seq = self.references.get(primer_name)
-
-        if reference_seq is None:
-            print(f"Warning: No reference sequence for primer {primer_name}", file=sys.stderr)
-            is_target = False
-            tm_target_fwd = tm_target_rev = 0.0
-        else:
-            # Check if this is the intended target (will refine this logic)
-            is_target = (forward_mm == 0 and reverse_mm == 0)
-
-            # Calculate Tm for perfect target binding
-            tm_target_fwd = self.calculate_tm(forward_seq, reference_seq, mismatch_count=0)
-            tm_target_rev = self.calculate_tm(reverse_seq, reference_seq, mismatch_count=0)
-
-        # Calculate Tm for actual binding (with mismatches)
+        # Tm and ΔTm are computable from the primer sequence alone — they do
+        # not depend on any reference. Always compute them.
+        tm_target_fwd = self.calculate_tm(forward_seq, "", mismatch_count=0)
+        tm_target_rev = self.calculate_tm(reverse_seq, "", mismatch_count=0)
         tm_actual_fwd = self.calculate_tm(forward_seq, "", mismatch_count=forward_mm)
         tm_actual_rev = self.calculate_tm(reverse_seq, "", mismatch_count=reverse_mm)
+        delta_tm_fwd = tm_target_fwd - tm_actual_fwd
+        delta_tm_rev = tm_target_rev - tm_actual_rev
+        delta_tm_avg = (delta_tm_fwd + delta_tm_rev) / 2.0
 
-        # Calculate ΔTm (use average of forward and reverse)
-        if reference_seq:
-            delta_tm_fwd = tm_target_fwd - tm_actual_fwd
-            delta_tm_rev = tm_target_rev - tm_actual_rev
-            delta_tm_avg = (delta_tm_fwd + delta_tm_rev) / 2.0
-        else:
-            delta_tm_fwd = delta_tm_rev = delta_tm_avg = 0.0
+        # Intended-target classification depends on whether the user declared
+        # intent via a reference FASTA. The reference's job is *only* to say
+        # "this primer's expected amplicon should look like this sequence."
+        #   None  = no reference declared for this primer → cannot classify
+        #   True  = binding-region genomic sequence matches the reference
+        #   False = reference was declared but the binding region doesn't match it
+        reference_seq = self.references.get(primer_name)
+        is_target = None
+        reference_match_identity = None
+        if reference_seq is not None:
+            is_target = False  # default if we can't check
+            if self.genome_fasta and forward_pos is not None and amplicon_length:
+                amplicon_seq = extract_amplicon_sequence(
+                    self.genome_fasta, forward_pos, amplicon_length
+                )
+                if amplicon_seq:
+                    is_target, reference_match_identity = check_reference_match(
+                        amplicon_seq, reference_seq
+                    )
 
         # Analyze primer structure (GC, dimers, hairpins)
         structure_fwd = analyze_primer_structure(forward_seq)
@@ -351,32 +305,41 @@ class ThermoAnalyzer:
             mm_profile_rev = self.analyze_mismatch_profile(reverse_seq, reverse_mm, 'reverse')
             mm_profile_rev['precise'] = False
 
-        # Calculate amplification probability
-        p_amp_fwd, class_fwd = self.calculate_amplification_probability(
-            forward_seq, tm_actual_fwd, tm_target_fwd, delta_tm_fwd, mm_profile_fwd, 'forward', is_target)
-        p_amp_rev, class_rev = self.calculate_amplification_probability(
-            reverse_seq, tm_actual_rev, tm_target_rev, delta_tm_rev, mm_profile_rev, 'reverse', is_target)
-
-        # Overall amplification probability (both primers must work)
+        # Amplification probability is always computed from thermodynamics
+        # alone. Whether the hit is "intended" or not is a separate question
+        # answered above.
+        p_amp_fwd, _ = self.calculate_amplification_probability(tm_actual_fwd, mm_profile_fwd)
+        p_amp_rev, _ = self.calculate_amplification_probability(tm_actual_rev, mm_profile_rev)
         p_amp_overall = p_amp_fwd * p_amp_rev
 
-        # Classification: intended targets take priority
-        if class_fwd == 'target' and class_rev == 'target':
-            classification = 'target'
-        # For off-targets, classify based on OVERALL probability
-        # This is more accurate than worst-case individual primer classification
-        elif p_amp_overall >= 0.7:
-            classification = 'high'
+        if p_amp_overall >= 0.7:
+            risk_bin = 'high'
         elif p_amp_overall >= 0.3:
-            classification = 'medium'
+            risk_bin = 'medium'
         else:
-            classification = 'low'
+            risk_bin = 'low'
+
+        # Combined classification used by the report. Targets get their own bin
+        # (only possible when intent was declared and matched); everything else
+        # falls into a probability-based risk bin. When intent is undeclared
+        # (is_target is None), there is no "target" label to assign.
+        if is_target is True:
+            classification = 'target'
+        else:
+            classification = risk_bin
 
         result = {
             'primer_name': primer_name,
             'genome': genome_name,
             'amplicon_length': amplicon_length,
+            # is_intended_target: True / False / null
+            #   null  = no reference declared for this primer
+            #   true  = binding region matches the declared reference
+            #   false = reference was declared but the binding region does not match
             'is_intended_target': is_target,
+            'reference_match_identity': (
+                round(reference_match_identity, 3) if reference_match_identity is not None else None
+            ),
 
             # Forward primer thermodynamics
             'forward_primer_seq': forward_seq,  # Original with IUPAC codes
@@ -549,6 +512,89 @@ def extract_genomic_sequence(genome_fasta: Path, position: int, length: int, str
     except Exception as e:
         print(f"Warning: Failed to extract genomic sequence at position {position}: {e}", file=sys.stderr)
         return None
+
+
+def extract_amplicon_sequence(genome_fasta: Path, forward_pos: int,
+                              amplicon_length: int) -> Optional[str]:
+    """
+    Pull the genomic amplicon sequence starting at the forward primer's 5'
+    binding position and spanning amplicon_length bases on the forward strand.
+
+    We deliberately use forward_pos + length rather than (forward_pos, reverse_pos).
+    For circular bacterial genomes, primersearch sometimes reports the reverse
+    primer's position on a different operon than the forward primer's, so
+    naively slicing [fwd_pos:rev_pos] produces a multi-megabase artefact even
+    when the underlying amplicon is a real intra-operon 465 bp product.
+
+    NOTE: only inspects the first FASTA record, matching extract_genomic_sequence().
+    Multi-contig genomes are an unresolved limitation in this module.
+    """
+    if forward_pos is None or not amplicon_length or amplicon_length <= 0:
+        return None
+    try:
+        record = next(SeqIO.parse(genome_fasta, 'fasta'))
+        seq = str(record.seq[forward_pos - 1:forward_pos - 1 + amplicon_length])
+        return seq if seq else None
+    except Exception as e:
+        print(f"Warning: amplicon extraction failed at {forward_pos}+{amplicon_length}: {e}",
+              file=sys.stderr)
+        return None
+
+
+def check_reference_match(amplicon_seq: str, reference_seq: str,
+                          threshold: float = 0.95) -> Tuple[bool, float]:
+    """
+    Decide whether an observed amplicon corresponds to the user-declared
+    intended-target reference for that primer pair.
+
+    Uses local pairwise alignment in both orientations (forward and reverse
+    complement). Identity is computed as matches divided by the *shorter*
+    of the two input sequences — not by the local alignment window length.
+    Otherwise a degenerate reference (e.g. all G's) can score 100 % via a
+    one-position match, which has nothing to do with real similarity.
+
+    With the shorter-sequence denominator:
+      - reference is the full amplicon region (≈ same length) → matches ≈ N,
+        identity ≈ 1.0
+      - reference is a sub-region of the amplicon → local alignment finds the
+        sub-region, matches ≈ len(reference), identity ≈ 1.0
+      - amplicon is a sub-region of a longer reference → symmetric
+      - degenerate / unrelated reference → only random-chance matches survive,
+        identity falls below threshold
+
+    Returns (matched, best_identity).
+    """
+    if not amplicon_seq or not reference_seq:
+        return (False, 0.0)
+
+    aligner = PairwiseAligner()
+    aligner.mode = 'local'
+    aligner.match_score = 1
+    aligner.mismatch_score = -1
+    aligner.open_gap_score = -2
+    aligner.extend_gap_score = -0.5
+
+    denom = max(1, min(len(amplicon_seq), len(reference_seq)))
+    best_identity = 0.0
+    candidates = [amplicon_seq, str(Seq(amplicon_seq).reverse_complement())]
+    for candidate in candidates:
+        try:
+            alignments = aligner.align(candidate, reference_seq)
+            if len(alignments) == 0:
+                continue
+            best = alignments[0]
+            a_aligned = str(best[0])
+            b_aligned = str(best[1])
+            if not a_aligned:
+                continue
+            matches = sum(1 for a, b in zip(a_aligned, b_aligned) if a == b and a != '-')
+            identity = matches / denom
+            best_identity = max(best_identity, identity)
+        except Exception as e:
+            print(f"Warning: reference alignment failed: {e}", file=sys.stderr)
+            continue
+
+    return (best_identity >= threshold, best_identity)
 
 
 def count_primer_length(primer_seq: str) -> int:
@@ -1034,6 +1080,7 @@ def main():
         results.append(analysis)
 
     # Output results
+    references_per_primer = {p: (p in references) for p in primers.keys()}
     output_data = {
         'metadata': {
             'primersearch_file': str(args.primersearch_file),
@@ -1044,7 +1091,11 @@ def main():
                 'high_risk': args.delta_tm_high,
                 'medium_risk': args.delta_tm_medium
             },
-            'total_amplicons': len(results)
+            'total_amplicons': len(results),
+            # Intent declaration state — consumed by the report to decide
+            # whether to render specificity / off-target sections.
+            'references_provided': len(references) > 0,
+            'references_per_primer': references_per_primer,
         },
         'results': results
     }
@@ -1057,14 +1108,22 @@ def main():
         print(json.dumps(output_data, indent=2))
 
     # Summary statistics
+    targets = sum(1 for r in results if r['risk_classification'] == 'target')
     high_risk = sum(1 for r in results if r['risk_classification'] == 'high')
     medium_risk = sum(1 for r in results if r['risk_classification'] == 'medium')
     low_risk = sum(1 for r in results if r['risk_classification'] == 'low')
+    undeclared = sum(1 for r in results if r['is_intended_target'] is None)
 
     print(f"\nAnalysis complete:", file=sys.stderr)
-    print(f"  High risk amplifications: {high_risk}", file=sys.stderr)
-    print(f"  Medium risk amplifications: {medium_risk}", file=sys.stderr)
-    print(f"  Low risk amplifications: {low_risk}", file=sys.stderr)
+    if output_data['metadata']['references_provided']:
+        print(f"  Intended-target hits: {targets}", file=sys.stderr)
+    else:
+        print(f"  (no references provided — target/off-target classification skipped)", file=sys.stderr)
+    print(f"  High P(amp) hits:   {high_risk}", file=sys.stderr)
+    print(f"  Medium P(amp) hits: {medium_risk}", file=sys.stderr)
+    print(f"  Low P(amp) hits:    {low_risk}", file=sys.stderr)
+    if undeclared and output_data['metadata']['references_provided']:
+        print(f"  Hits with no per-primer reference: {undeclared}", file=sys.stderr)
 
 
 if __name__ == '__main__':

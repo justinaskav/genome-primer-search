@@ -34,3 +34,10 @@ Fusobacterium equinum
 Fusobacterium naviforme
 Fusobacterium simiae
 Fusobacterium pseudonecrophorum
+
+## animalis
+NZ_CP096640.1
+Fusobacterium animalis
+Fusobacterium polymorphum
+Fusobacterium vincentii
+Fusobacterium fusiforme

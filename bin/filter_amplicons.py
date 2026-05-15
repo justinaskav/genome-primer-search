@@ -1,7 +1,35 @@
 #!/usr/bin/env python3
 """
 Filter amplicons from EMBOSS primersearch output based on size criteria.
-Removes likely circular genome artifacts and invalid amplicons.
+
+Output schema (stats.json):
+    {
+      "min_size": 50,
+      "max_size": 10000,
+      "totals": {
+        "total_amplicons": int,
+        "retained": int,
+        "filtered_too_small": int,
+        "filtered_too_large": int
+      },
+      "per_primer": {
+        "<primer_name>": {
+          "found": int, "kept": int,
+          "filtered_too_small": int, "filtered_too_large": int,
+          "contigs": ["NC_xxx", ...]
+        }
+      },
+      "per_contig": {
+        "<sequence_id>": {"found": int, "kept": int}
+      },
+      "amplicons": [<amplicon_record>, ...]   # kept only
+    }
+
+Each <amplicon_record> contains:
+    primer, amplimer_number, sequence_id, sequence_desc, length,
+    forward: {primer_seq, strand, pos, mismatches},
+    reverse: {primer_seq, strand, pos, mismatches},
+    filter_status: "kept" | "too_small" | "too_large"
 """
 
 import argparse
@@ -9,143 +37,207 @@ import json
 import re
 import sys
 
+PRIMER_HIT_RE = re.compile(
+    r'^\s*(?P<seq>\S+)\s+hits\s+(?P<strand>forward|reverse)\s+strand\s+at\s+'
+    r'\[?(?P<pos>\d+)\]?\s+with\s+(?P<mm>\d+)\s+mismatches\s*$'
+)
+AMPLIMER_LENGTH_RE = re.compile(r'Amplimer length:\s+(\d+)\s+bp')
+AMPLIMER_HEADER_RE = re.compile(r'^Amplimer\s+(\d+)\s*$')
+
 
 def parse_primersearch_output(input_file):
-    """
-    Parse EMBOSS primersearch output and extract amplicon information.
-    Returns list of amplicons with metadata.
-    """
     amplicons = []
     current_primer = None
-    current_amplicon = {}
-    in_amplicon = False
+    current = None
+
+    def flush():
+        nonlocal current
+        if current and current.get('length') is not None:
+            amplicons.append(current)
+        current = None
 
     with open(input_file, 'r') as f:
-        for line in f:
-            line = line.rstrip('\n')
+        prev_was_sequence = False
+        for raw in f:
+            line = raw.rstrip('\n')
+            stripped = line.strip()
 
-            # Detect primer name
             if line.startswith('Primer name '):
-                current_primer = line.replace('Primer name ', '').strip()
-                in_amplicon = False
+                flush()
+                name = line[len('Primer name '):].strip()
+                current_primer = name if name else None
+                continue
 
-            # Detect amplicon start
-            elif line.startswith('Amplimer '):
-                if current_amplicon and 'length' in current_amplicon:
-                    amplicons.append(current_amplicon)
-
-                current_amplicon = {
+            m = AMPLIMER_HEADER_RE.match(stripped)
+            if m:
+                flush()
+                current = {
                     'primer': current_primer,
-                    'header': line,
-                    'lines': [line]
+                    'amplimer_number': int(m.group(1)),
+                    'sequence_id': None,
+                    'sequence_desc': None,
+                    'length': None,
+                    'forward': None,
+                    'reverse': None,
                 }
-                in_amplicon = True
+                prev_was_sequence = False
+                continue
 
-            # Detect amplicon length
-            elif in_amplicon and 'Amplimer length:' in line:
-                match = re.search(r'Amplimer length:\s+(\d+)\s+bp', line)
-                if match:
-                    current_amplicon['length'] = int(match.group(1))
-                    current_amplicon['lines'].append(line)
+            if current is None:
+                continue
 
-            # Collect all lines for current amplicon
-            elif in_amplicon:
-                current_amplicon['lines'].append(line)
+            if stripped.startswith('Sequence:'):
+                current['sequence_id'] = stripped[len('Sequence:'):].strip() or None
+                prev_was_sequence = True
+                continue
 
-    # Add last amplicon if exists
-    if current_amplicon and 'length' in current_amplicon:
-        amplicons.append(current_amplicon)
+            if prev_was_sequence and stripped and not stripped.startswith('Amplimer') \
+                    and 'hits forward strand' not in stripped \
+                    and 'hits reverse strand' not in stripped \
+                    and 'Amplimer length:' not in stripped:
+                current['sequence_desc'] = stripped
+                prev_was_sequence = False
+                continue
+            prev_was_sequence = False
+
+            hit = PRIMER_HIT_RE.match(line)
+            if hit:
+                record = {
+                    'primer_seq': hit.group('seq'),
+                    'strand': hit.group('strand'),
+                    'pos': int(hit.group('pos')),
+                    'mismatches': int(hit.group('mm')),
+                }
+                # primersearch always reports the forward-strand hit first, then
+                # the reverse-strand hit. Use strand as the slot key.
+                if hit.group('strand') == 'forward':
+                    current['forward'] = record
+                else:
+                    current['reverse'] = record
+                continue
+
+            lm = AMPLIMER_LENGTH_RE.search(line)
+            if lm:
+                current['length'] = int(lm.group(1))
+                continue
+
+        flush()
 
     return amplicons
 
 
-def filter_amplicons(amplicons, min_size, max_size):
-    """
-    Filter amplicons based on size criteria.
-    Returns filtered amplicons and statistics.
-    """
-    filtered = []
-    stats = {
+def classify(amp, min_size, max_size):
+    length = amp['length']
+    if length < min_size:
+        return 'too_small'
+    if length > max_size:
+        return 'too_large'
+    return 'kept'
+
+
+def build_stats(amplicons, min_size, max_size):
+    per_primer = {}
+    per_contig = {}
+    totals = {
         'total_amplicons': len(amplicons),
         'retained': 0,
         'filtered_too_small': 0,
         'filtered_too_large': 0,
-        'primers_with_hits': set(),
-        'primers_after_filter': set()
     }
+    kept_records = []
 
     for amp in amplicons:
-        stats['primers_with_hits'].add(amp['primer'])
-        length = amp['length']
+        primer = amp['primer'] or '_unnamed_'
+        contig = amp['sequence_id'] or '_unknown_'
+        status = classify(amp, min_size, max_size)
+        amp['filter_status'] = status
 
-        if length < min_size:
-            stats['filtered_too_small'] += 1
-        elif length > max_size:
-            stats['filtered_too_large'] += 1
+        pp = per_primer.setdefault(primer, {
+            'found': 0, 'kept': 0,
+            'filtered_too_small': 0, 'filtered_too_large': 0,
+            'contigs': set(),
+        })
+        pp['found'] += 1
+        pp['contigs'].add(contig)
+
+        pc = per_contig.setdefault(contig, {'found': 0, 'kept': 0})
+        pc['found'] += 1
+
+        if status == 'kept':
+            totals['retained'] += 1
+            pp['kept'] += 1
+            pc['kept'] += 1
+            kept_records.append(amp)
+        elif status == 'too_small':
+            totals['filtered_too_small'] += 1
+            pp['filtered_too_small'] += 1
         else:
-            filtered.append(amp)
-            stats['retained'] += 1
-            stats['primers_after_filter'].add(amp['primer'])
+            totals['filtered_too_large'] += 1
+            pp['filtered_too_large'] += 1
 
-    # Convert sets to counts for JSON serialization
-    stats['unique_primers_before'] = len(stats['primers_with_hits'])
-    stats['unique_primers_after'] = len(stats['primers_after_filter'])
-    stats['primers_with_hits'] = list(stats['primers_with_hits'])
-    stats['primers_after_filter'] = list(stats['primers_after_filter'])
+    for v in per_primer.values():
+        v['contigs'] = sorted(v['contigs'])
 
-    return filtered, stats
+    return {
+        'min_size': min_size,
+        'max_size': max_size,
+        'totals': totals,
+        'per_primer': per_primer,
+        'per_contig': per_contig,
+        'amplicons': kept_records,
+    }
 
 
-def write_filtered_output(filtered_amplicons, output_file):
-    """
-    Write filtered amplicons back to primersearch format.
-    """
+def write_filtered_output(kept_amplicons, output_file):
+    """Re-emit kept amplicons in primersearch format for backward compatibility."""
     current_primer = None
-
     with open(output_file, 'w') as f:
-        for amp in filtered_amplicons:
-            # Write primer name header if changed
-            if amp['primer'] != current_primer:
-                if current_primer is not None:
-                    f.write('\n')  # Blank line between primers
-                f.write(f"Primer name {amp['primer']}\n")
-                current_primer = amp['primer']
+        # group by primer
+        by_primer = {}
+        for amp in kept_amplicons:
+            by_primer.setdefault(amp['primer'], []).append(amp)
 
-            # Write all amplicon lines
-            for line in amp['lines']:
-                f.write(line + '\n')
+        for primer, amps in by_primer.items():
+            f.write(f"\nPrimer name {primer}\n")
+            for amp in amps:
+                f.write(f"Amplimer {amp['amplimer_number']}\n")
+                if amp['sequence_id']:
+                    f.write(f"\tSequence: {amp['sequence_id']}  \n")
+                if amp['sequence_desc']:
+                    f.write(f"\t{amp['sequence_desc']}\n")
+                if amp['forward']:
+                    fw = amp['forward']
+                    f.write(f"\t{fw['primer_seq']} hits forward strand at {fw['pos']} with {fw['mismatches']} mismatches\n")
+                if amp['reverse']:
+                    rv = amp['reverse']
+                    f.write(f"\t{rv['primer_seq']} hits reverse strand at [{rv['pos']}] with {rv['mismatches']} mismatches\n")
+                f.write(f"\tAmplimer length: {amp['length']} bp\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Filter amplicons from primersearch output'
-    )
-    parser.add_argument('--input', required=True, help='Input primersearch file')
-    parser.add_argument('--output', required=True, help='Output filtered file')
-    parser.add_argument('--stats', required=True, help='Output statistics JSON file')
-    parser.add_argument('--min-size', type=int, default=50, help='Minimum amplicon size (bp)')
-    parser.add_argument('--max-size', type=int, default=10000, help='Maximum amplicon size (bp)')
-
+    parser = argparse.ArgumentParser(description='Filter amplicons from primersearch output')
+    parser.add_argument('--input', required=True)
+    parser.add_argument('--output', required=True)
+    parser.add_argument('--stats', required=True)
+    parser.add_argument('--min-size', type=int, default=50)
+    parser.add_argument('--max-size', type=int, default=10000)
     args = parser.parse_args()
 
-    # Parse input
     amplicons = parse_primersearch_output(args.input)
+    stats = build_stats(amplicons, args.min_size, args.max_size)
 
-    # Filter amplicons
-    filtered, stats = filter_amplicons(amplicons, args.min_size, args.max_size)
-
-    # Write outputs
-    write_filtered_output(filtered, args.output)
+    kept = [a for a in stats['amplicons']]
+    write_filtered_output(kept, args.output)
 
     with open(args.stats, 'w') as f:
         json.dump(stats, f, indent=2)
 
-    # Print summary to stderr
-    print(f"Filtered {stats['total_amplicons']} amplicons:", file=sys.stderr)
-    print(f"  - Retained: {stats['retained']}", file=sys.stderr)
-    print(f"  - Too small (<{args.min_size} bp): {stats['filtered_too_small']}", file=sys.stderr)
-    print(f"  - Too large (>{args.max_size} bp): {stats['filtered_too_large']}", file=sys.stderr)
-    print(f"  - Primers: {stats['unique_primers_before']} -> {stats['unique_primers_after']}", file=sys.stderr)
+    t = stats['totals']
+    print(f"Filtered {t['total_amplicons']} amplicons:", file=sys.stderr)
+    print(f"  - Retained: {t['retained']}", file=sys.stderr)
+    print(f"  - Too small (<{args.min_size} bp): {t['filtered_too_small']}", file=sys.stderr)
+    print(f"  - Too large (>{args.max_size} bp): {t['filtered_too_large']}", file=sys.stderr)
+    print(f"  - Primers: {len(stats['per_primer'])}; contigs: {len(stats['per_contig'])}", file=sys.stderr)
 
 
 if __name__ == '__main__':

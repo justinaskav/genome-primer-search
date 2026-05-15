@@ -18,7 +18,7 @@ nextflow run main.nf -resume
 ## Features
 
 - **Multiple input types**: Taxon names, genome assemblies, or individual nucleotide sequences
-- **Smart filtering**: Removes circular genome artifacts (>10kb amplicons)
+- **Smart filtering**: Drops oversized cross-locus pairings (>10kb amplicons by default)
 - **Thermodynamic analysis**: Optional off-target amplification risk assessment using nearest-neighbor Tm calculations
 - **Scalable reports**: Long-format TSV works with any number of primers
 - **Parallel processing**: Configurable concurrent downloads and searches
@@ -128,19 +128,21 @@ _output/
 
 **summary.tsv** - Long/normalized format for scalability:
 ```
-Genome	Primer	Total_Found	Kept	Filtered_Circular	Filtered_Small	Mean_Size	Size_Range
+Genome	Primer	Total_Found	Kept	Filtered_Too_Large	Filtered_Too_Small	Mean_Size	Size_Range
 E_coli	_GENOME_TOTAL_	36	14	22	0	-	-
-E_coli	16S_27F	20	8	12	0	1375	465-1506
-E_coli	16S_V3V4	15	6	9	0	465	465-465
+E_coli	16S_27F	18	7	11	0	1506	1506-1506
+E_coli	16S_V3V4	18	7	11	0	465	465-465
 ```
 
-Rows with `_GENOME_TOTAL_` provide per-genome aggregates. Easy to filter/analyze in Excel, R, or Python.
+Rows with `_GENOME_TOTAL_` provide per-genome aggregates. Per-primer counts are exact (no proportional allocation).
 
 **primer_stats.tsv** - Per-primer summary:
 ```
-Primer	Kept	Filtered_Total	Filtered_Circular	Filtered_Small	Genomes_Hit	Mean_Size	Size_Range
-16S_27F	16	22	22	0	2	1375	465-1506
+Primer	Kept	Filtered_Total	Filtered_Too_Large	Filtered_Too_Small	Genomes_Hit	Mean_Size	Size_Range
+16S_27F	14	22	22	0	2	1506	1506-1506
 ```
+
+**filter_stats/`<genome>`_stats.json** - per-genome detail. Each kept amplicon now carries the source contig, primer-binding positions, per-primer mismatch counts, and strand. Per-primer and per-contig breakdowns are also included.
 
 ## Pipeline Workflow
 
@@ -184,16 +186,16 @@ nextflow run main.nf \
 
 ## Filtering
 
-The pipeline automatically filters amplicons:
+The pipeline filters amplicons by size:
 
-- **Circular genome artifacts**: Amplicons >10kb (configurable with `--max_amplicon_size`)
+- **Too large**: Amplicons >10kb (configurable with `--max_amplicon_size`)
 - **Too small**: Amplicons <50bp (configurable with `--min_amplicon_size`)
 
-Bacterial genomes are circular, so primers binding in opposite orientations can appear to span the entire genome. These false positives are automatically removed.
+EMBOSS primersearch treats each contig as a linear sequence and reports the cartesian product of forward-strand × reverse-strand hits. When a primer binds at multiple loci (e.g. the seven 16S `rrn` operons in *E. coli*), this produces many oversized "amplicons" that span between operons — none of which would form a real PCR product. The size cutoff drops these.
 
 **Example**: E. coli with 16S primers
-- Raw results: 36 amplicons found
-- After filtering: 14 retained (22 circular artifacts removed)
+- Raw results: 36 amplicons reported by primersearch
+- After filtering: 14 retained (22 oversized cross-locus pairings removed)
 
 Check `results/filter_stats/*.json` for detailed filtering information per genome.
 
